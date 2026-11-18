@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>متابعة مشاريع التبريد المركزي | مصاعد السرور</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">س</span>
+        <div>
+          <strong>مصاعد السرور</strong>
+          <small>قسم التبريد المركزي</small>
+        </div>
+      </div>
+
+      <nav class="nav" aria-label="القائمة الرئيسية">
+        <a href="#dashboard" data-nav="dashboard" class="nav-link">لوحة التحكم</a>
+        <a href="#projects" data-nav="projects" class="nav-link">المشاريع</a>
+        <a href="#new" data-nav="new" class="nav-link">عقد جديد</a>
+        <a href="#backup" data-nav="backup" class="nav-link">النسخ الاحتياطي</a>
+      </nav>
+
+      <div class="sidebar-foot">متابعة الكوادر والمواد والمراحل</div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <h1 id="pageTitle"></h1>
+        <div id="topActions"></div>
+      </header>
+      <main id="view" class="content"></main>
+    </div>
+
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="app.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
