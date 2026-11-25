@@ -65,6 +65,7 @@
   /* ---------- نافذة تأكيد ---------- */
   function confirmBox({ title, body, okText = 'تأكيد', danger = false }) {
     const dlg = document.getElementById('dialog');
+    if (dlg.open) dlg.close();
     return new Promise((resolve) => {
       const done = (v) => { dlg.close(); resolve(v); };
       clear(dlg);
@@ -74,7 +75,8 @@
         h('div', { class: 'row end' },
           h('button', { type: 'button', class: 'btn ghost', onClick: () => done(false) }, 'إلغاء'),
           h('button', { type: 'button', class: 'btn ' + (danger ? 'danger' : 'primary'), onClick: () => done(true) }, okText))));
-      dlg.onclose = () => resolve(false);
+      dlg.onclose = null;
+      dlg.oncancel = (e) => { e.preventDefault(); done(false); };
       dlg.showModal();
     });
   }

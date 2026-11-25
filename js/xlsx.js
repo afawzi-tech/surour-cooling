@@ -164,20 +164,20 @@
   }
 
   // الأنماط: 0 عادي، 1 عنوان، 2 ناجح، 3 فاشل، 4 معلّق، 5 لا ينطبق، 6 نسبة، 7 عنوان كبير، 8 تنبيه
-  const STYLE = { normal: 0, header: 1, pass: 2, fail: 3, pending: 4, na: 5, pct: 6, title: 7, alert: 8 };
+  const STYLE = { normal: 0, header: 1, pass: 2, fail: 3, pending: 4, na: 5, pct: 6, title: 7, alert: 8, input: 9, calc: 10, calcPct: 11 };
   const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font></fonts>
-<fills count="8"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
+<fills count="10"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFC6EFCE"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFFFC7CE"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFFFF2CC"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFE7E6E6"/></patternFill></fill>
 <fill><patternFill patternType="solid"><fgColor rgb="FFD9E1F2"/></patternFill></fill>
-<fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/></patternFill></fill></fills>
+<fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFF99"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/></patternFill></fill></fills>
 <borders count="2"><border/><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom></border></borders>
 <cellStyleXfs count="1"><xf/></cellStyleXfs>
-<cellXfs count="9">
+<cellXfs count="12">
 <xf borderId="1" applyBorder="1"/>
 <xf fontId="1" fillId="6" borderId="1" applyFont="1" applyFill="1" applyBorder="1"><alignment wrapText="1" vertical="center"/></xf>
 <xf fillId="2" borderId="1" applyFill="1" applyBorder="1"/>
@@ -187,7 +187,18 @@
 <xf numFmtId="9" borderId="1" applyNumberFormat="1" applyBorder="1"/>
 <xf fontId="2"/>
 <xf fontId="1" fillId="7" borderId="1" applyFont="1" applyFill="1" applyBorder="1"/>
-</cellXfs></styleSheet>`;
+<xf fillId="8" borderId="1" applyFill="1" applyBorder="1"/>
+<xf fillId="9" borderId="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="9" fillId="9" borderId="1" applyNumberFormat="1" applyFill="1" applyBorder="1"/>
+</cellXfs>
+<dxfs count="6">
+<dxf><font><color rgb="FF006100"/></font><fill><patternFill><bgColor rgb="FFC6EFCE"/></patternFill></fill></dxf>
+<dxf><font><color rgb="FF9C0006"/></font><fill><patternFill><bgColor rgb="FFFFC7CE"/></patternFill></fill></dxf>
+<dxf><font><color rgb="FF7F6000"/></font><fill><patternFill><bgColor rgb="FFFFF2CC"/></patternFill></fill></dxf>
+<dxf><font><color rgb="FF595959"/></font><fill><patternFill><bgColor rgb="FFE7E6E6"/></patternFill></fill></dxf>
+<dxf><font><b/><color rgb="FFFFFFFF"/></font><fill><patternFill><bgColor rgb="FFFF0000"/></patternFill></fill></dxf>
+<dxf><font><b/><color rgb="FF9C0006"/></font><fill><patternFill><bgColor rgb="FFFFC7CE"/></patternFill></fill></dxf>
+</dxfs></styleSheet>`;
 
   // rows: مصفوفة صفوف، وكل خلية إما قيمة أو {v, s} حيث s اسم نمط
   function sheetXml(rows, opts = {}) {
@@ -202,17 +213,29 @@
       const cells = row.map((cell, c) => {
         if (cell === null || cell === undefined || cell === '') return '';
         const o = typeof cell === 'object' && !(cell instanceof Date) ? cell : { v: cell };
-        if (o.v === null || o.v === undefined || o.v === '') return o.s ? `<c r="${colName(c)}${r + 1}" s="${STYLE[o.s] || 0}"/>` : '';
+        if (!o.f && (o.v === null || o.v === undefined || o.v === '')) return o.s ? `<c r="${colName(c)}${r + 1}" s="${STYLE[o.s] || 0}"/>` : '';
         const s = STYLE[o.s] ?? 0;
         const ref = colName(c) + (r + 1);
+        if (o.f) {
+          const fx = `<f>${escX(o.f)}</f>`;
+          if (typeof o.v === 'number' && Number.isFinite(o.v)) return `<c r="${ref}" s="${s}">${fx}<v>${o.v}</v></c>`;
+          return `<c r="${ref}" s="${s}" t="str">${fx}<v>${escX(o.v ?? '')}</v></c>`;
+        }
         if (typeof o.v === 'number' && Number.isFinite(o.v)) return `<c r="${ref}" s="${s}"><v>${o.v}</v></c>`;
         return `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${escX(o.v)}</t></is></c>`;
       }).join('');
       return `<row r="${r + 1}">${cells}</row>`;
     }).join('');
     const filter = opts.autoFilter ? `<autoFilter ref="${opts.autoFilter}"/>` : '';
+    let prio = 1;
+    const cf = (opts.cf || []).map((c) => `<conditionalFormatting sqref="${c.sqref}">${c.rules.map((r) =>
+      `<cfRule type="cellIs" dxfId="${r.dxf}" priority="${prio++}" operator="equal"><formula>${escX(r.formula)}</formula></cfRule>`).join('')}</conditionalFormatting>`).join('');
+    const dv = (opts.validations || []).length
+      ? `<dataValidations count="${opts.validations.length}">${opts.validations.map((v) =>
+        `<dataValidation type="list" allowBlank="1" showErrorMessage="1" sqref="${v.sqref}"><formula1>${escX(v.list)}</formula1></dataValidation>`).join('')}</dataValidations>`
+      : '';
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${freeze}${cols}<sheetData>${body}</sheetData>${filter}</worksheet>`;
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${freeze}${cols}<sheetData>${body}</sheetData>${filter}${cf}${dv}</worksheet>`;
   }
 
   // sheets: [{ name, rows, opts }]
