@@ -74,7 +74,8 @@
 - **مشروع Supabase مربوط:** `ecfxadnbeuvuuxoocyjn` (منطقة ap-northeast-1)، والرابط ومفتاح anon في `js/config.js`. شُغّل `schema.sql` عليه، وأُطفئ التسجيل الذاتي، واختُبرت الأدوار على القاعدة الحقيقية داخل معاملة تُلغى.
 - مشاريع Supabase الحديثة لا تمنح `authenticated` صلاحيات على الجداول تلقائياً، لذلك في `schema.sql` أوامر grant صريحة.
 - مفتاح إدارة Supabase محفوظ في بيئة `surour-cooling` كـ network secret لـ `api.supabase.com` (لا يظهر في الكود).
-- المتبقي: حساب المدير (ينشئه المستخدم بكلمة مروره من لوحة Supabase ثم يُرقّى بـ SQL)، واختيار مكان النشر.
+- حساب المدير أُنشئ ورُقّي إلى admin.
+- **النشر:** المستودع صار عاماً، وGitHub Pages من فرع `main` / root على https://afawzi-tech.github.io/surour-cooling/ ، و`site_url` في Supabase مضبوط عليه. فرع `main` صار يطابق `v2-supabase`.
 
 ## 5. قرارات مفتوحة (تحتاج إجابة من المستخدم)
 1. **الأدوار وصلاحياتها بالتفصيل.**
