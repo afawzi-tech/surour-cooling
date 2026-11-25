@@ -35,6 +35,9 @@
     { key: 'storage',  label: 'مكان تخزين المواد متوفر' }
   ];
 
+  const BRANDS = { lg: 'LG', midea: 'Midea' };
+  const brandChip = (b) => (BRANDS[b] ? h('span', { class: 'brand-chip ' + b, dir: 'ltr' }, BRANDS[b]) : null);
+
   const ROLES = { admin: 'مدير', supervisor: 'مشرف', technician: 'فني' };
   const TABLES = { profiles: 'المستخدمون', projects: 'العقود', project_finance: 'قيمة العقد', project_stages: 'المراحل', materials: 'المواد' };
   const ACTIONS = { INSERT: 'إضافة', UPDATE: 'تعديل', DELETE: 'حذف' };
@@ -46,7 +49,7 @@
     profile: null,
     projects: [],
     loaded: false,
-    filter: { q: '', status: 'all' }
+    filter: { q: '', status: 'all', brand: 'all' }
   };
 
   const role = () => state.profile?.role;
@@ -314,6 +317,7 @@
       ['إجمالي المساحة (م²)', num(area), '']
     ];
     if (isStaff()) kpis.push(['إجمالي القيم (د.ع)', num(all.reduce((s, p) => s + (Number(totalOf(p)) || 0), 0)), '']);
+    Object.entries(BRANDS).forEach(([k, l]) => kpis.push(['مشاريع ' + l, num(all.filter((p) => p.brand === k).length), 'tone-' + k]));
 
     // توزيع المشاريع الجارية على المراحل
     const byStage = STAGES.map((s) => ({ ...s, count: all.filter((p) => currentStage(p)?.stage_key === s.key).length }));
@@ -341,7 +345,7 @@
       const cur = currentStage(p);
       return h('li', null, h('a', { href: '#/project/' + p.id, class: 'pitem' },
         h('div', { class: 'pitem-main' },
-          h('strong', null, p.client),
+          h('strong', null, p.client, ' ', brandChip(p.brand)),
           h('small', { class: 'muted' }, [p.address, date(p.contract_date)].filter(Boolean).join(' · '))),
         h('div', { class: 'pitem-side' },
           h('small', null, cur ? STAGE_NAME[cur.stage_key] : 'مكتمل'),
@@ -358,6 +362,7 @@
       const list = state.projects.filter((p) => {
         if (state.filter.status === 'done' && !isComplete(p)) return false;
         if (state.filter.status === 'doing' && isComplete(p)) return false;
+        if (state.filter.brand !== 'all' && p.brand !== state.filter.brand) return false;
         return !q || [p.client, p.address, p.phone].some((x) => String(x || '').toLowerCase().includes(q));
       });
       clear(listBox).appendChild(list.length ? projectList(list) : empty('لا توجد نتائج'));
@@ -381,9 +386,13 @@
           }
         }, l)));
 
+    const brandSel = h('select', { class: 'brand-filter', 'aria-label': 'البراند', onChange: (e) => { state.filter.brand = e.target.value; draw(); } },
+      h('option', { value: 'all', selected: state.filter.brand === 'all' }, 'كل البراندات'),
+      Object.entries(BRANDS).map(([k, l]) => h('option', { value: k, selected: state.filter.brand === k }, l)));
+
     draw();
     return h('section', { class: 'card' },
-      h('div', { class: 'toolbar' }, search, seg,
+      h('div', { class: 'toolbar' }, search, seg, brandSel,
         isStaff() ? h('a', { href: '#/new', class: 'btn primary' }, '+ عقد جديد') : null),
       listBox);
   }
@@ -394,6 +403,7 @@
     if (!p) return empty('المشروع غير موجود', 'ربما حُذف أو ليست لديك صلاحية لرؤيته.', h('a', { href: '#/projects', class: 'btn' }, 'العودة للمشاريع'));
 
     const info = [
+      ['البراند', brandChip(p.brand) || 'غير محدد'],
       ['الهاتف', p.phone ? h('span', { dir: 'ltr' }, p.phone) : '—'],
       ['العنوان', p.address || '—'],
       ['الموقع على الخريطة', p.map_url && SAFE_URL.test(p.map_url)
@@ -409,7 +419,7 @@
         h('div', { class: 'hero-head' },
           h('div', null,
             h('a', { href: '#/projects', class: 'link small' }, '→ المشاريع'),
-            h('h2', null, p.client),
+            h('h2', null, p.client, ' ', brandChip(p.brand)),
             h('p', { class: 'muted' }, `${doneCount(p)} من ${STAGES.length} مراحل مكتملة`)),
           h('div', { class: 'row' },
             isStaff() ? h('a', { href: '#/edit/' + p.id, class: 'btn' }, 'تعديل') : null,
@@ -566,6 +576,9 @@
 
     const inputs = {
       client: h('input', { maxlength: 200, value: p?.client ?? '', autocomplete: 'off' }),
+      brand: h('select', null,
+        h('option', { value: '', selected: !p?.brand }, 'اختر البراند'),
+        Object.entries(BRANDS).map(([k, l]) => h('option', { value: k, selected: p?.brand === k }, l))),
       phone: h('input', { type: 'tel', dir: 'ltr', maxlength: 20, value: p?.phone ?? '', placeholder: '07XX XXX XXXX' }),
       address: h('input', { maxlength: 300, value: p?.address ?? '' }),
       map_url: h('input', { type: 'url', dir: 'ltr', maxlength: 1000, value: p?.map_url ?? '', placeholder: 'https://maps.google.com/…' }),
@@ -583,6 +596,7 @@
       const v = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value.trim()]));
       const bad = {};
       if (!v.client) bad.client = 'اسم العميل مطلوب';
+      if (!BRANDS[v.brand]) bad.brand = 'اختر البراند';
       if (v.phone && !/^\+?[0-9 ()-]{7,20}$/.test(v.phone)) bad.phone = 'أدخل رقم هاتف صحيح';
       if (v.map_url && !SAFE_URL.test(v.map_url)) bad.map_url = 'يجب أن يبدأ الرابط بـ https://';
       if (v.size_m2 && !(Number(v.size_m2) > 0)) bad.size_m2 = 'أدخل مساحة أكبر من صفر';
@@ -595,7 +609,7 @@
       if (first) return inputs[first].focus();
 
       const row = {
-        client: v.client, phone: v.phone || null, address: v.address || null, map_url: v.map_url || null,
+        client: v.client, brand: v.brand, phone: v.phone || null, address: v.address || null, map_url: v.map_url || null,
         size_m2: v.size_m2 ? Number(v.size_m2) : null, floors: v.floors ? Number(v.floors) : null,
         contract_date: v.contract_date, notes: v.notes || null
       };
@@ -619,6 +633,7 @@
       h('div', { class: 'card-head' }, h('h2', null, p ? 'تعديل بيانات العقد' : 'بيانات العميل والموقع')),
       h('div', { class: 'form-grid' },
         f('client', 'اسم العميل', { required: true }),
+        f('brand', 'البراند', { required: true }),
         f('phone', 'رقم الهاتف'),
         f('address', 'العنوان', { wide: true }),
         f('map_url', 'رابط الموقع على الخريطة', { wide: true }),
@@ -726,7 +741,7 @@
       version: 2,
       exported_at: new Date().toISOString(),
       projects: state.projects.map((p) => ({
-        client: p.client, phone: p.phone, address: p.address, map_url: p.map_url, size_m2: p.size_m2,
+        client: p.client, brand: p.brand, phone: p.phone, address: p.address, map_url: p.map_url, size_m2: p.size_m2,
         floors: p.floors, contract_date: p.contract_date, notes: p.notes, total_iqd: totalOf(p),
         stages: stagesOf(p).map((s) => ({
           stage_key: s.stage_key, status: s.status, workers: s.workers, start_date: s.start_date,
@@ -832,6 +847,7 @@
 
       return {
         client: s(p.client, 200),
+        brand: BRANDS[String(p.brand || '').toLowerCase()] ? String(p.brand).toLowerCase() : null,
         phone: s(p.phone, 20),
         address: s(p.address, 300),
         map_url: mapUrl && SAFE_URL.test(mapUrl) ? mapUrl : null,
@@ -850,7 +866,7 @@
 
   async function importOne(p) {
     const ins = await state.sb.from('projects').insert({
-      client: p.client, phone: p.phone && /^\+?[0-9 ()-]{7,20}$/.test(p.phone) ? p.phone : null, address: p.address,
+      client: p.client, brand: p.brand, phone: p.phone && /^\+?[0-9 ()-]{7,20}$/.test(p.phone) ? p.phone : null, address: p.address,
       map_url: p.map_url, size_m2: p.size_m2 > 0 ? p.size_m2 : null,
       floors: Number.isInteger(p.floors) && p.floors >= 0 ? p.floors : null,
       contract_date: p.contract_date,

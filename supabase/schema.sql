@@ -72,6 +72,7 @@ create trigger profiles_protect_self
 create table if not exists public.projects (
   id             uuid primary key default gen_random_uuid(),
   client         text not null check (char_length(btrim(client)) between 1 and 200),
+  brand          text check (brand in ('lg', 'midea')),   -- البراند: LG أو Midea
   phone          text check (phone is null or phone ~ '^\+?[0-9 ()-]{7,20}$'),
   address        text check (char_length(address) <= 300),
   map_url        text check (map_url is null or (map_url ~* '^https://\S+$' and char_length(map_url) <= 1000)),
@@ -83,6 +84,9 @@ create table if not exists public.projects (
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
+
+-- لقواعد البيانات المنشأة قبل إضافة البراند
+alter table public.projects add column if not exists brand text check (brand in ('lg', 'midea'));
 
 -- قيمة العقد في جدول منفصل حتى لا يراها الفني
 create table if not exists public.project_finance (

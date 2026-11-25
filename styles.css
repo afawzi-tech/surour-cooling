@@ -19,6 +19,8 @@
   --danger-soft: #fbe3e0;
   --shadow: 0 1px 2px rgb(16 35 46 / 6%), 0 4px 14px rgb(16 35 46 / 5%);
   --radius: 14px;
+  --lg: #a50034;
+  --midea: #0072bc;
   color-scheme: light;
 }
 
@@ -114,6 +116,15 @@ a { color: var(--brand); }
 }
 .kpi.tone-doing { border-top-color: var(--doing); }
 .kpi.tone-done { border-top-color: var(--done); }
+.kpi.tone-lg { border-top-color: var(--lg); }
+.kpi.tone-midea { border-top-color: var(--midea); }
+.brand-chip {
+  display: inline-block; vertical-align: middle; padding: 0 8px; border-radius: 6px; font-size: .75rem;
+  font-weight: 800; letter-spacing: .3px; line-height: 1.6; color: #fff; font-family: system-ui, sans-serif;
+}
+.brand-chip.lg { background: var(--lg); }
+.brand-chip.midea { background: var(--midea); }
+.toolbar .brand-filter { width: auto; min-width: 140px; }
 .kpi-label { display: block; color: var(--muted); font-size: .9rem; }
 .kpi-value { font-size: 1.6rem; font-weight: 800; direction: ltr; display: inline-block; }
 
@@ -206,7 +217,7 @@ input, select, textarea {
 }
 textarea { resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
-input.invalid { border-color: var(--danger); }
+input.invalid, select.invalid { border-color: var(--danger); }
 input[type="file"] { padding: 7px; }
 
 .btn {
