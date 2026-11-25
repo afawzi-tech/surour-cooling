@@ -57,6 +57,7 @@
     const box = document.getElementById('toasts');
     const t = h('div', { class: 'toast ' + type }, msg);
     box.appendChild(t);
+    while (box.children.length > 3) box.firstChild.remove();
     setTimeout(() => t.classList.add('out'), 3200);
     setTimeout(() => t.remove(), 3700);
   }
