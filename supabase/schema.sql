@@ -245,6 +245,16 @@ revoke all on all tables in schema public from anon;
 revoke execute on all functions in schema public from anon, public;
 grant execute on function public.app_role(), public.is_staff(), public.is_admin() to authenticated;
 
+-- صلاحيات صريحة للمستخدم المسجّل (مشاريع Supabase الحديثة لا تمنحها تلقائياً).
+-- هذه الصلاحيات تسمح فقط بمحاولة العملية، وقواعد RLS أدناه هي التي تقرر الصفوف المسموحة.
+grant usage on schema public to authenticated;
+grant select, update                 on public.profiles        to authenticated;
+grant select, insert, update, delete on public.projects        to authenticated;
+grant select, update                 on public.project_finance to authenticated;
+grant select, update                 on public.project_stages  to authenticated;
+grant select, insert, update, delete on public.materials       to authenticated;
+grant select                         on public.audit_log       to authenticated;
+
 -- profiles
 drop policy if exists profiles_select on public.profiles;
 create policy profiles_select on public.profiles for select to authenticated
