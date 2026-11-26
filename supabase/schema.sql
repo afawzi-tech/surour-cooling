@@ -104,6 +104,16 @@ alter table public.projects add column if not exists lim_vacuum_max    integer  
 alter table public.projects add column if not exists lim_vacuum_hold   integer      not null default 60;    -- J2
 alter table public.projects add column if not exists lim_charge_tol    numeric(5, 3) not null default 0.05; -- N2
 
+-- بيانات المشروع على مستوى الشركة (مشاريع بكل المحافظات وبماركات مختلفة)
+alter table public.projects add column if not exists governorate text check (governorate in (
+  'بغداد', 'البصرة', 'نينوى', 'أربيل', 'السليمانية', 'دهوك', 'كركوك', 'الأنبار', 'صلاح الدين', 'ديالى',
+  'بابل', 'كربلاء', 'النجف', 'واسط', 'ميسان', 'ذي قار', 'المثنى', 'القادسية'));
+alter table public.projects add column if not exists city text check (char_length(city) <= 80);
+alter table public.projects add column if not exists brand text check (char_length(btrim(brand)) between 1 and 40);
+alter table public.projects add column if not exists project_type text not null default 'residential'
+  check (project_type in ('residential', 'apartments', 'commercial', 'government', 'other'));
+alter table public.projects add column if not exists unit_label text not null default 'وحدة' check (char_length(btrim(unit_label)) between 1 and 20);
+
 create or replace function public.touch_updated_at()
 returns trigger language plpgsql as $$
 begin
@@ -405,7 +415,6 @@ begin
 end $$;
 
 -- أعمدة الإصدارات السابقة غير الموجودة في الملف
-alter table public.projects drop column if exists brand;
 alter table public.projects drop column if exists phone;
 alter table public.projects drop column if exists address;
 alter table public.projects drop column if exists map_url;

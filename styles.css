@@ -663,3 +663,56 @@ h1, h2, h3, .btn, .sheet-tab, .bar-nav a, .bottom-nav a { font-family: var(--f-h
   .auth-brand p { font-size: 1.05rem; }
   .auth-form { align-self: start; padding-top: 24px; }
 }
+
+/* ==========================================================
+   الصفحة الرئيسية للشركة: المشاريع بكل المحافظات
+   ========================================================== */
+.dash2.home { margin: 0; border-radius: var(--radius); }
+.gov-map { direction: ltr; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: minmax(64px, auto); gap: 6px;
+  padding: 12px; background: var(--t0); border: 1px solid var(--grid); }
+.gov.tile { aspect-ratio: auto; direction: rtl; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 2px;
+  padding: 8px 10px; font: inherit; font-family: var(--f-head); text-align: start; cursor: pointer; border: 0; min-height: 64px; }
+.gov .g-name { font-size: .82rem; font-weight: 700; line-height: 1.2; }
+.gov b { font-size: 1.35rem; line-height: 1; }
+.gov.none { background: transparent; box-shadow: inset 0 0 0 1px var(--grid); color: var(--ink-2); cursor: default; }
+.gov.none .g-name { font-weight: 500; opacity: .8; }
+.gov.sel { outline: 3px solid var(--survey); outline-offset: 2px; position: relative; z-index: 2; }
+.gov:hover:not(.none) { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+.brand-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.brand-list button { width: 100%; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "b p" "s p" "bar bar"; gap: 2px 10px; align-items: center;
+  padding: 10px 2px; background: none; border: 0; border-bottom: 1px dashed var(--grid); font: inherit; color: var(--ink); text-align: start; cursor: pointer; min-height: 44px; }
+.brand-list button b { grid-area: b; font-family: var(--f-head); }
+.brand-list button small { grid-area: s; color: var(--ink-2); }
+.brand-list button .st-bar { grid-area: bar; }
+.brand-list button .bp { grid-area: p; font-family: var(--f-head); font-weight: 800; }
+.brand-list button.sel b { color: var(--survey); }
+
+.d2-today h2, .d2-projects h2 { padding-bottom: 8px; border-bottom: 1px solid var(--grid); }
+.today-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; }
+.today-list li { display: grid; grid-template-columns: 52px minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--grid); font-size: .9rem; }
+.today-list time { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.today-list a { color: var(--ink); text-decoration: none; }
+.today-list li span { color: var(--ok); } .today-list li.act-fail span { color: var(--bad); font-weight: 700; }
+.today-list small { color: var(--ink-2); }
+
+.proj-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.proj { display: grid; grid-template-columns: minmax(0, 2fr) 90px minmax(120px, 1fr) minmax(0, 1.2fr); gap: 14px; align-items: center;
+  padding: 12px 2px; border-bottom: 1px solid var(--grid); color: var(--ink); text-decoration: none; min-height: 56px; }
+.proj:hover b { text-decoration: underline; }
+.pj-main b { font-family: var(--f-head); display: block; }
+.pj-main small { color: var(--ink-2); }
+.pj-units { color: var(--ink-2); font-size: .9rem; }
+.pj-prog { display: grid; grid-template-columns: 1fr 52px; gap: 8px; align-items: center; }
+.pj-prog b { font-family: var(--f-head); text-align: end; }
+.pj-flags { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 760px) {
+  .dash2.home { margin: 0; padding: 16px 14px 22px; }
+  .gov-map { gap: 4px; padding: 8px; grid-auto-rows: minmax(58px, auto); max-width: none; }
+  .gov.tile { padding: 6px 7px; min-height: 58px; }
+  .gov .g-name { font-size: .72rem; }
+  .proj { grid-template-columns: minmax(0, 1fr) 96px; grid-template-areas: "m p" "u f"; gap: 4px 10px; }
+  .pj-main { grid-area: m; } .pj-prog { grid-area: p; } .pj-units { grid-area: u; font-size: .8rem; } .pj-flags { grid-area: f; }
+  .today-list li { grid-template-columns: 44px minmax(0, 1fr); }
+  .today-list li span, .today-list li small { grid-column: 2; }
+}

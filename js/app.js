@@ -11,6 +11,26 @@
   const cfg = window.SUROUR_CONFIG || {};
 
   const ROLES = { admin: 'مدير', supervisor: 'مشرف', technician: 'فني' };
+
+  // المحافظات على شبكة مربعات تقريبية (الشمال فوق والغرب يسار): [الاسم، العمود، الصف]
+  const GOVS = [
+    ['دهوك', 3, 1], ['نينوى', 2, 2], ['أربيل', 3, 2], ['السليمانية', 4, 2],
+    ['صلاح الدين', 2, 3], ['كركوك', 3, 3], ['ديالى', 4, 3],
+    ['الأنبار', 1, 4], ['بغداد', 2, 4], ['واسط', 3, 4],
+    ['كربلاء', 1, 5], ['بابل', 2, 5], ['ميسان', 4, 5],
+    ['النجف', 1, 6], ['القادسية', 2, 6], ['ذي قار', 3, 6], ['البصرة', 4, 6],
+    ['المثنى', 2, 7]
+  ];
+  const PTYPES = { residential: 'مجمّع سكني / فلل', apartments: 'شقق وعمارات', commercial: 'مبنى تجاري', government: 'مبنى حكومي', other: 'أخرى' };
+  const BRAND_SUGGEST = ['LG', 'Midea', 'Gree', 'Samsung', 'Daikin', 'Carrier', 'Toshiba', 'Hitachi', 'Mitsubishi', 'Haier', 'TCL'];
+  // صيغ اسم الوحدة: المفرد، المعرّف، الجمع، الجمع المعرّف، المؤنث؟
+  const UNIT_WORDS = {
+    'فيلا': ['فيلا', 'الفيلا', 'فلل', 'الفلل', true], 'بيت': ['بيت', 'البيت', 'بيوت', 'البيوت', false],
+    'شقة': ['شقة', 'الشقة', 'شقق', 'الشقق', true], 'طابق': ['طابق', 'الطابق', 'طوابق', 'الطوابق', false],
+    'مبنى': ['مبنى', 'المبنى', 'مبانٍ', 'المباني', false], 'منظومة': ['منظومة', 'المنظومة', 'منظومات', 'المنظومات', true],
+    'وحدة': ['وحدة', 'الوحدة', 'وحدات', 'الوحدات', true]
+  };
+  const unitWords = (p) => { const w = UNIT_WORDS[p?.unit_label] || UNIT_WORDS['وحدة']; return { one: w[0], the: w[1], many: w[2], theMany: w[3], fem: w[4] }; };
   // قيم الخانات كما في الملف، مع الاسم العربي للعرض
   const RES = { pass: 'Pass', fail: 'Fail', pending: 'Pending', na: 'N/A' };
   const RES_AR = { pass: 'ناجح', fail: 'فاشل', pending: 'معلّق', na: 'لا ينطبق' };
@@ -178,7 +198,6 @@
 
     const r = parseRoute();
     // مشروع واحد فقط؟ افتحه مباشرة مثل فتح ملف Excel
-    if (r.name === 'home' && state.projects.length === 1 && !state._stayHome) return go('project/' + state.projects[0].id);
     let v = views[r.name] || views.home;
     if (v.allow && !v.allow()) v = views.home;
     const title = typeof v.title === 'function' ? v.title(r) : v.title;
@@ -203,7 +222,7 @@
     ].filter((x) => x[2]);
     const header = h('header', { class: 'bar' },
       h('a', { href: '#/home', class: 'logo', onClick: () => { state._stayHome = true; } },
-        logo(), h('span', { class: 'logo-text' }, 'فحص جودة VRF')),
+        logo(), h('span', { class: 'logo-text' }, 'متابعة الجودة')),
       p ? h('span', { class: 'crumb' }, p.client) : null,
       h('button', { type: 'button', class: 'btn ghost menu-btn', 'aria-label': 'القائمة', 'aria-expanded': 'false', onClick: (e) => {
         const open = header.classList.toggle('open');
@@ -250,7 +269,7 @@
     return h('div', { class: 'auth2' },
       h('section', { class: 'auth-brand' }, pattern,
         h('div', { class: 'auth-brand-in' }, logo('big'),
-          h('p', null, 'متابعة فحص جودة تركيب VRF في الفلل، فيلا فيلا ومرحلة مرحلة.'))),
+          h('p', null, 'متابعة فحص جودة تركيب منظومات التبريد في كل مشاريع سرور، وحدة وحدة ومرحلة مرحلة.'))),
       h('form', { class: 'auth-form', onSubmit: async (e) => {
         e.preventDefault(); err.textContent = ''; btn.disabled = true; btn.textContent = 'جارٍ الدخول…';
         const { error } = await state.sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
@@ -299,30 +318,175 @@
 
   /* ---------- المشاريع ---------- */
   views.home = {
-    title: 'المشاريع',
-    render() {
-      const list = h('div', { class: 'cards' }, state.projects.map((p) => h('a', { href: '#/project/' + p.id, class: 'pcard' },
-        h('strong', null, p.client), h('small', { class: 'muted' }, 'أُنشئ ' + date(p.created_at)))));
-      return h('div', { class: 'stack' },
-        h('div', { class: 'row between' }, h('h1', null, 'المشاريع'),
-          isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: newProject }, '+ مشروع جديد') : null),
-        state.projects.length ? list : empty('لا توجد مشاريع بعد', isStaff() ? 'أنشئ مشروعاً، ثم استورد ملف Excel أو أضف الفلل.' : 'لم يُنشئ المدير أي مشروع بعد.'));
+    title: 'مشاريع سرور',
+    async render() {
+      await Promise.all(state.projects.map((p) => loadProject(p.id)));
+      const cps = state.checkpoints;
+      const f = state._hf || (state._hf = { gov: '', brand: '' });
+      const today = new Date().toISOString().slice(0, 10);
+      const rows = state.projects.map((p) => {
+        const d = state.data[p.id];
+        const D = F.dashboard(d, cps);
+        const units = d.units.map((u) => F.row(u, cps, openNcrsOf(d, u.id)));
+        const late = d.ncrs.filter((n) => n.status === 'open' && n.due_date && n.due_date < today).length;
+        return { p, d, D, fails: units.filter((k) => k.R).length, alerts: D.B8, open: D.B9, late };
+      });
+      const issues = (r) => r.fails + r.alerts + r.open;
+      const sum = (k) => rows.reduce((a, r) => a + r.D[k], 0);
+      let pass = 0, den = 0;
+      rows.forEach((r) => r.D.per.forEach((x) => { pass += x.Pass; den += r.D.B3 - x['N/A']; }));
+      const overall = den ? pass / den : 0;
+      const govCount = new Set(state.projects.map((p) => p.governorate).filter(Boolean)).size;
+      const attn = rows.filter((r) => issues(r)).sort((a, b) => (b.late - a.late) || (issues(b) - issues(a)));
+
+      const lead = !rows.length ? 'لا توجد مشاريع بعد. أنشئ أول مشروع لتبدأ المتابعة.'
+        : `${num(rows.length)} ${rows.length === 1 ? 'مشروع' : rows.length <= 10 ? 'مشاريع' : 'مشروعاً'} في ${num(govCount)} ${govCount === 1 ? 'محافظة' : 'محافظات'}، فيها ${num(sum('B3'))} وحدة. `
+          + (attn.length ? `${attn.length === 1 ? 'مشروع واحد يحتاج' : num(attn.length) + ' مشاريع تحتاج'} انتباهك.` : 'لا مشاكل مفتوحة الآن.');
+
+      // خريطة المحافظات
+      const band = (v, has) => (!has ? 'none' : v >= 1 ? 'done' : v === 0 ? 'b0' : v < 0.25 ? 'b1' : v < 0.5 ? 'b2' : v < 0.75 ? 'b3' : 'b4');
+      const govMap = h('div', { class: 'gov-map', role: 'list', 'aria-label': 'المشاريع حسب المحافظة' }, GOVS.map(([g, c, r]) => {
+        const rs = rows.filter((x) => x.p.governorate === g);
+        let gp = 0, gd = 0;
+        rs.forEach((x) => x.D.per.forEach((y) => { gp += y.Pass; gd += x.D.B3 - y['N/A']; }));
+        const prob = rs.some((x) => x.fails || x.open) ? ' flag-fail' : rs.some((x) => x.alerts) ? ' flag-alert' : '';
+        const label = `${g}: ${rs.length ? `${rs.length} مشروع، إنجاز ${pctText(gd ? gp / gd : 0)}` : 'لا مشاريع'}`;
+        const el = h('button', { type: 'button', role: 'listitem', class: `gov tile ${band(gd ? gp / gd : 0, rs.length)}${prob}${f.gov === g ? ' sel' : ''}`, title: label, 'aria-label': label, 'aria-pressed': String(f.gov === g),
+          onClick: () => { f.gov = f.gov === g ? '' : g; render(); } }, h('span', { class: 'g-name' }, g), rs.length ? h('b', null, String(rs.length)) : null);
+        el.style.gridColumn = String(c); el.style.gridRow = String(r);
+        return el;
+      }));
+
+      // حسب الماركة
+      const brands = [...new Set(rows.map((r) => r.p.brand || 'غير محددة'))].sort();
+      const byBrand = brands.map((b) => {
+        const rs = rows.filter((r) => (r.p.brand || 'غير محددة') === b);
+        let bp = 0, bd = 0; rs.forEach((x) => x.D.per.forEach((y) => { bp += y.Pass; bd += x.D.B3 - y['N/A']; }));
+        return { b, n: rs.length, units: rs.reduce((a, x) => a + x.D.B3, 0), pct: bd ? bp / bd : 0 };
+      });
+
+      // قائمة المشاريع (تتأثر باختيار المحافظة والماركة)
+      const list = rows.filter((r) => (!f.gov || r.p.governorate === f.gov) && (!f.brand || (r.p.brand || 'غير محددة') === f.brand));
+      const projRow = (r) => h('li', null, h('a', { href: '#/project/' + r.p.id, class: 'proj' },
+        h('span', { class: 'pj-main' }, h('b', null, r.p.client),
+          h('small', null, [r.p.governorate, r.p.city, r.p.brand, PTYPES[r.p.project_type]].filter(Boolean).join('، ') || 'بدون بيانات موقع')),
+        h('span', { class: 'pj-units' }, `${num(r.D.B3)} ${unitWords(r.p).one}`),
+        h('span', { class: 'pj-prog' }, h('span', { class: 'st-bar' }, h('span', { style: { width: (r.D.B10 * 100).toFixed(1) + '%' } })), h('b', null, pctText(r.D.B10))),
+        h('span', { class: 'pj-flags' },
+          r.fails ? h('span', { class: 'chip st-has-failure' }, `${r.fails} فيها فشل`) : null,
+          r.alerts ? h('span', { class: 'chip alert' }, `${r.alerts} تنبيه`) : null,
+          r.open ? h('span', { class: 'chip' }, `${r.open} NCR` + (r.late ? `، ${r.late} متأخرة` : '')) : null)));
+
+      const out = h('div', { class: 'dash2 home' },
+        h('header', { class: 'd2-head' },
+          h('p', { class: 'd2-lead' }, lead),
+          h('div', { class: 'd2-pct' }, h('strong', null, pctText(overall)), h('span', null, 'من فحوصات كل المشاريع منجزة'))),
+        h('dl', { class: 'd2-stats' }, [
+          ['المشاريع', rows.length, ''], ['الوحدات', sum('B3'), ''], ['وحدات مكتملة', sum('B4'), 'ok'],
+          ['فيها بند فاشل', sum('B7'), sum('B7') ? 'bad' : 'muted'], ['تنبيهات تسلسل', sum('B8'), sum('B8') ? 'warn' : 'muted'], ['NCR مفتوحة', sum('B9'), sum('B9') ? 'bad' : 'muted']
+        ].map(([l, v, c]) => h('div', { class: 'st ' + c }, h('dd', null, num(v)), h('dt', null, l)))),
+        h('div', { class: 'd2-grid' },
+          h('section', { class: 'd2-plan' },
+            h('div', { class: 'd2-plan-head' }, h('h2', null, 'المشاريع حسب المحافظة'),
+              h('span', { class: 'd2-note' }, f.gov ? `معروض: ${f.gov}. اضغطها مرة ثانية لإلغاء الاختيار` : 'اضغط محافظة لعرض مشاريعها')),
+            govMap),
+          h('aside', { class: 'd2-side' },
+            h('section', { class: 'd2-attn' + (attn.length ? ' has' : '') },
+              h('h2', null, 'مشاريع تحتاج انتباهك'),
+              attn.length ? h('ul', null, attn.slice(0, 12).map((r) => h('li', null, h('a', { href: '#/project/' + r.p.id },
+                h('b', null, r.p.client),
+                h('span', { class: 'why' + (r.fails || r.open ? '' : ' alert') }, [r.fails ? `${r.fails} وحدة فيها فشل` : '', r.alerts ? `${r.alerts} تنبيه تسلسل` : '', r.open ? `${r.open} NCR مفتوحة` : '', r.late ? `${r.late} متأخرة` : ''].filter(Boolean).join('، ')),
+                h('span', { class: 'nx' }, r.p.governorate || '')))))
+                : h('p', { class: 'calm' }, 'لا فشل ولا تنبيهات ولا NCR مفتوحة.')),
+            h('section', { class: 'd2-brands' }, h('h2', null, 'حسب الماركة'),
+              byBrand.length ? h('ul', { class: 'brand-list' }, byBrand.map((x) => h('li', null,
+                h('button', { type: 'button', class: f.brand === x.b ? 'sel' : '', 'aria-pressed': String(f.brand === x.b), onClick: () => { f.brand = f.brand === x.b ? '' : x.b; render(); } },
+                  h('b', { dir: 'auto' }, x.b), h('small', null, `${x.n} مشروع، ${num(x.units)} وحدة`),
+                  h('span', { class: 'st-bar' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })), h('span', { class: 'bp' }, pctText(x.pct))))))
+                : h('p', { class: 'calm' }, '—')))),
+        h('section', { class: 'd2-today', 'aria-live': 'polite' }, h('h2', null, 'نشاط اليوم'), todayActivity()),
+        h('section', { class: 'd2-projects' },
+          h('div', { class: 'd2-plan-head' },
+            h('h2', null, f.gov || f.brand ? `المشاريع: ${[f.gov, f.brand].filter(Boolean).join('، ')} (${list.length})` : `كل المشاريع (${list.length})`),
+            h('div', { class: 'row' },
+              f.gov || f.brand ? h('button', { type: 'button', class: 'btn sm', onClick: () => { f.gov = ''; f.brand = ''; render(); } }, 'إلغاء التصفية') : null,
+              isStaff() ? h('button', { type: 'button', class: 'btn sm primary', onClick: newProject }, '+ مشروع جديد') : null)),
+          list.length ? h('ul', { class: 'proj-list' }, list.map(projRow)) : h('p', { class: 'calm muted' }, rows.length ? 'لا مشاريع بهذه التصفية.' : (isStaff() ? 'أنشئ أول مشروع من زر "+ مشروع جديد".' : 'لم يُنشئ المدير أي مشروع بعد.'))));
+      return out;
     }
   };
 
+  // نشاط اليوم: آخر تغييرات النتائج في كل المشاريع
+  function todayActivity() {
+    const box = h('div', null, h('p', { class: 'd2-note' }, 'جارٍ التحميل…'));
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    Promise.all([
+      fetchAll((a, b) => state.sb.from('unit_checks').select('unit_id, checkpoint, result, inspected_by, inspected_at, units!inner(project_id, code)')
+        .gte('inspected_at', start.toISOString()).order('inspected_at', { ascending: false }).range(a, b)),
+      state.sb.from('profiles').select('id, full_name')
+    ]).then(([rows, prof]) => {
+      const names = Object.fromEntries((prof.data || []).map((x) => [x.id, x.full_name]));
+      const cp = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
+      const proj = Object.fromEntries(state.projects.map((p) => [p.id, p]));
+      clear(box);
+      if (!rows.length) return box.appendChild(h('p', { class: 'calm muted' }, 'لم تُسجَّل فحوصات اليوم بعد.'));
+      const cnt = { pass: 0, fail: 0, na: 0, pending: 0 };
+      rows.forEach((x) => { cnt[x.result]++; });
+      // سطر لكل وحدة: ماذا تغيّر فيها اليوم
+      const byUnit = new Map();
+      rows.forEach((x) => {
+        if (!byUnit.has(x.unit_id)) byUnit.set(x.unit_id, { x, items: [], who: new Set() });
+        const g = byUnit.get(x.unit_id); g.items.push(x); if (x.inspected_by) g.who.add(names[x.inspected_by] || '');
+      });
+      const units = [...byUnit.values()];
+      box.append(h('p', { class: 'd2-note' }, `${num(rows.length)} نتيجة سُجّلت اليوم في ${num(units.length)} وحدة: ناجح ${cnt.pass}، فاشل ${cnt.fail}، لا ينطبق ${cnt.na}.`),
+        h('ol', { class: 'today-list' }, units.slice(0, 10).map(({ x, items, who }) => {
+          const fails = items.filter((i) => i.result === 'fail');
+          const passes = items.filter((i) => i.result === 'pass').length;
+          return h('li', { class: fails.length ? 'act-fail' : '' },
+            h('time', { dir: 'ltr' }, new Date(x.inspected_at).toTimeString().slice(0, 5)),
+            h('a', { href: `#/project/${x.units.project_id}/villa/${x.unit_id}` }, h('b', null, x.units.code), ' ', proj[x.units.project_id]?.client || ''),
+            h('span', null, fails.length ? `فاشل: ${fails.map((i) => cp[i.checkpoint]).join('، ')}` : `${passes} ناجح` + (items.length > passes ? `، ${items.length - passes} أخرى` : '')),
+            h('small', null, [...who].filter(Boolean).join('، ')));
+        })),
+        units.length > 10 ? h('p', { class: 'd2-note' }, `و${num(units.length - 10)} وحدة أخرى.`) : null);
+    }).catch(() => { clear(box).appendChild(h('p', { class: 'calm muted' }, 'تعذّر تحميل نشاط اليوم.')); });
+    return box;
+  }
+
+  // حقول بيانات المشروع (للإنشاء والتعديل)
+  function projectFields(p = {}) {
+    const el = {
+      name: h('input', { maxlength: 200, value: p.client || '', placeholder: 'مثال: مجمّع الزهراء السكني' }),
+      gov: h('select', null, h('option', { value: '' }, 'اختر المحافظة'), GOVS.map(([g]) => h('option', { value: g, selected: p.governorate === g }, g))),
+      city: h('input', { maxlength: 80, value: p.city || '', placeholder: 'المدينة أو المنطقة' }),
+      brand: h('input', { maxlength: 40, value: p.brand || '', list: 'brand-list', dir: 'auto', placeholder: 'LG، Midea…' }),
+      type: h('select', null, Object.entries(PTYPES).map(([k, l]) => h('option', { value: k, selected: (p.project_type || 'residential') === k }, l))),
+      label: h('select', null, Object.keys(UNIT_WORDS).map((k) => h('option', { value: k, selected: (p.unit_label || 'فيلا') === k }, k)))
+    };
+    const dl = h('datalist', { id: 'brand-list' }, BRAND_SUGGEST.map((b) => h('option', { value: b })));
+    const grid = h('div', { class: 'form-grid' },
+      field('اسم المشروع', el.name, { wide: true }), field('المحافظة', el.gov), field('المدينة', el.city),
+      field('الماركة', el.brand), field('نوع المشروع', el.type), field('اسم الوحدة', el.label, { hint: 'كيف تُسمّى وحدات هذا المشروع: فيلا، شقة، طابق…' }), dl);
+    const values = () => ({ client: el.name.value.trim(), governorate: el.gov.value || null, city: el.city.value.trim() || null,
+      brand: el.brand.value.trim() || null, project_type: el.type.value, unit_label: el.label.value });
+    return { el, grid, values };
+  }
+
   function newProject() {
-    const name = h('input', { maxlength: 200, placeholder: 'مثال: المدينة السكنية' });
-    const count = h('input', { type: 'number', min: 0, max: 2000, dir: 'ltr', value: 250 });
+    const pf = projectFields();
+    const count = h('input', { type: 'number', min: 0, max: 2000, dir: 'ltr', value: 0 });
     const prefix = h('input', { dir: 'ltr', value: 'V-', maxlength: 10 });
-    modal('مشروع جديد', h('div', { class: 'form-grid' },
-      field('اسم المشروع', name, { wide: true }),
-      field('عدد الفلل', count, { hint: 'مثل الملف: 250 (V-001 إلى V-250). ضع 0 إذا ستستورد ملف Excel.' }),
-      field('بادئة الترقيم', prefix)),
-    [{ label: 'إنشاء', cls: 'primary', run: async () => {
+    modal('مشروع جديد', h('div', { class: 'stack sm' }, pf.grid,
+      h('div', { class: 'form-grid' },
+        field('عدد الوحدات', count, { hint: 'ضع 0 إذا ستستورد ملف Excel للمشروع' }),
+        field('بادئة الترقيم', prefix, { hint: 'مثال: V- تعطي V-001، V-002…' }))),
+    [{ label: 'إنشاء المشروع', cls: 'primary', run: async () => {
+      const v = pf.values();
       const n = Number(count.value);
-      if (!name.value.trim()) { toast('اكتب اسم المشروع', 'error'); return false; }
-      if (!(Number.isInteger(n) && n >= 0 && n <= 2000)) { toast('عدد الفلل من 0 إلى 2000', 'error'); return false; }
-      const res = await state.sb.from('projects').insert({ client: name.value.trim() }).select().single();
+      if (!v.client) { toast('اكتب اسم المشروع', 'error'); pf.el.name.focus(); return false; }
+      if (!(Number.isInteger(n) && n >= 0 && n <= 2000)) { toast('عدد الوحدات من 0 إلى 2000', 'error'); return false; }
+      const res = await state.sb.from('projects').insert(v).select().single();
       if (res.error) { fail(res.error); return false; }
       const digits = Math.max(3, String(n).length);
       const rows = Array.from({ length: n }, (_, i) => ({ project_id: res.data.id, code: prefix.value.trim() + String(i + 1).padStart(digits, '0'), position: i + 1 }));
@@ -429,7 +593,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, isAdmin, isStaff, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, isAdmin, isStaff, unitWords, projectFields, GOVS, PTYPES, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));
