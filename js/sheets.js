@@ -50,7 +50,9 @@
       const tab = SHEETS.some((s) => s[0] === r.tab) ? r.tab : 'dashboard';
       const body = { dashboard: sheetDashboard, tracker: sheetTracker, tests: sheetTests, ncr: sheetNcr, guide: sheetGuide }[tab](p, d);
       return h('div', { class: 'book' },
-        h('div', { class: 'book-head' }, h('h1', null, p.client), projectActions(p, d)),
+        h('div', { class: 'book-head' },
+          h('div', null, h('a', { href: A.isCompound(p) ? '#/compounds' : '#/home', class: 'link small back' }, A.isCompound(p) ? '→ المجمّعات السكنية' : '→ كل المشاريع'), h('h1', null, p.client)),
+          projectActions(p, d)),
         h('nav', { class: 'sheet-tabs', 'aria-label': 'أوراق المشروع' }, SHEETS.map(([k, ar, en]) =>
           h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), title: en, 'aria-current': k === tab ? 'page' : null }, k === 'tracker' ? 'متابعة ' + W.theMany : ar))),
         h('div', { class: 'sheet' }, body),
@@ -172,6 +174,8 @@
             h('div', { class: 'mixbar', role: 'img', 'aria-label': mix.map(([, v, l]) => `${l} ${v}`).join('، ') },
               mix.filter(([, v]) => v > 0).map(([c, v]) => { const s2 = h('span', { class: c }); s2.style.flexGrow = String(v); return s2; })),
             h('ul', { class: 'mix-key' }, mix.map(([c, v, l]) => h('li', null, h('i', { class: c }), `${l}: ${num(v)}`)))))),
+      h('div', { class: 'd2-groups' }, groupBlock(rows, 'zone', 'حسب البلوك / المنطقة'), groupBlock(rows, 'crew', 'حسب الفرقة')),
+      h('section', { class: 'd2-today' }, h('h2', null, 'نشاط اليوم'), A.todayActivity([p.id])),
       h('section', { class: 'd2-route', 'aria-labelledby': 'route-h' },
         h('h2', { id: 'route-h' }, 'مسار الفحص'),
         h('p', { class: 'd2-note' }, `عدد ${W.theMany} التي نجحت في كل مرحلة، بالترتيب. المرحلة الفاشلة أو المعلّقة توقف ما بعدها.`),
@@ -180,6 +184,25 @@
           h('span', { class: 'st-name' }, x.c.name_ar, h('small', { dir: 'ltr' }, x.c.itp_ref)),
           h('span', { class: 'st-bar', 'aria-hidden': 'true' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })),
           h('span', { class: 'st-count' }, h('b', null, num(x.Pass)), x.Fail ? h('em', null, `${x.Fail} فاشل`) : null))))));
+  }
+
+  // تقدّم الوحدات مجمّعة حسب المنطقة أو الفرقة
+  function groupBlock(rows, key, title) {
+    const m = new Map();
+    rows.forEach(({ u, k }) => { const g = u[key] || ''; if (!m.has(g)) m.set(g, []); m.get(g).push(k); });
+    const named = [...m.entries()].filter(([g]) => g);
+    if (!named.length) {
+      return h('section', { class: 'd2-group' }, h('h2', null, title),
+        h('p', { class: 'calm muted' }, key === 'zone' ? `لم تُحدَّد المناطق بعد. اكتب البلوك أو المنطقة لكل ${W.one} من صفحتها أو من ملف Excel.` : `لم تُحدَّد الفرق بعد. اكتب الفرقة لكل ${W.one} من صفحتها أو من ملف Excel.`));
+    }
+    const list = [...m.entries()].map(([g, ks]) => ({ g: g || 'غير محددة', n: ks.length, done: ks.filter((k) => k.U === 'Complete').length,
+      fail: ks.filter((k) => k.R).length, alert: ks.filter((k) => k.W).length, pct: ks.reduce((a, k) => a + k.S, 0) / ks.length }))
+      .sort((a, b) => (a.g === 'غير محددة') - (b.g === 'غير محددة') || String(a.g).localeCompare(String(b.g), 'ar', { numeric: true }));
+    return h('section', { class: 'd2-group' }, h('h2', null, title),
+      h('ul', { class: 'brand-list grp-list' }, list.map((x) => h('li', null, h('div', { class: 'grp-row' },
+        h('b', { dir: 'auto' }, x.g), h('small', null, `${num(x.n)} ${W.one}، مكتملة ${num(x.done)}`),
+        h('span', { class: 'st-bar' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })), h('span', { class: 'bp' }, A.pctText(x.pct)),
+        x.fail || x.alert ? h('span', { class: 'grp-flags' }, x.fail ? h('span', { class: 'chip st-has-failure' }, `${x.fail} فيها فشل`) : null, x.alert ? h('span', { class: 'chip alert' }, `${x.alert} تنبيه`) : null) : null)))));
   }
 
   /* ==========================================================

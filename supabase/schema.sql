@@ -110,8 +110,9 @@ alter table public.projects add column if not exists governorate text check (gov
   'بابل', 'كربلاء', 'النجف', 'واسط', 'ميسان', 'ذي قار', 'المثنى', 'القادسية'));
 alter table public.projects add column if not exists city text check (char_length(city) <= 80);
 alter table public.projects add column if not exists brand text check (char_length(btrim(brand)) between 1 and 40);
-alter table public.projects add column if not exists project_type text not null default 'residential'
-  check (project_type in ('residential', 'apartments', 'commercial', 'government', 'other'));
+-- compound = مجمّع سكني بعدد وحدات كبير (له قسم خاص في التطبيق)
+alter table public.projects add column if not exists project_type text not null default 'houses'
+  check (project_type in ('compound', 'houses', 'apartments', 'commercial', 'government', 'other'));
 alter table public.projects add column if not exists unit_label text not null default 'وحدة' check (char_length(btrim(unit_label)) between 1 and 20);
 
 create or replace function public.touch_updated_at()
