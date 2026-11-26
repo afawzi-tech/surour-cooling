@@ -1,7 +1,8 @@
 /* ==========================================================
-   أوراق المشروع - مطابقة لملف VRF QC Tracker
-   How to use | Dashboard | Villa Tracker | Test Records | NCR Register
-   + استيراد وتصدير Excel (التصدير بمعادلات حقيقية وقوائم منسدلة وتلوين)
+   أوراق المشروع - مطابقة لملف VRF QC Tracker في المعادلات
+   لوحة التحكم | متابعة الفلل | سجل الفحوصات | عدم المطابقة | طريقة الاستخدام
+   + صفحة الفيلا (مناسبة للجوال في الموقع)
+   + استيراد وتصدير Excel (التصدير بالإنجليزية ومعادلات حقيقية كالملف الأصلي)
    ========================================================== */
 (() => {
   'use strict';
@@ -13,16 +14,25 @@
   const F = A.F;
 
   const SHEETS = [
-    ['dashboard', 'Dashboard', 'لوحة التحكم'],
-    ['tracker', 'Villa Tracker', 'متابعة الفلل'],
-    ['tests', 'Test Records', 'سجل الفحوصات'],
-    ['ncr', 'NCR Register', 'سجل عدم المطابقة'],
-    ['guide', 'How to use', 'طريقة الاستخدام']
+    ['dashboard', 'لوحة التحكم', 'Dashboard'],
+    ['tracker', 'متابعة الفلل', 'Villa Tracker'],
+    ['tests', 'سجل الفحوصات', 'Test Records'],
+    ['ncr', 'عدم المطابقة', 'NCR Register'],
+    ['guide', 'طريقة الاستخدام', 'How to use']
   ];
-  const RES_KEYS = ['pending', 'pass', 'fail', 'na'];
+  const RES_KEYS = ['pass', 'fail', 'pending', 'na'];
+  const SYM = { pass: '✓', fail: '✗', pending: '·', na: '—' };
+  const CHECK_AR = { OK: 'مقبول', CHECK: 'راجع' };
   const today = () => new Date().toISOString().slice(0, 10);
   const projectOf = (id) => S.projects.find((p) => p.id === id);
   const blank = (v) => v === null || v === undefined || v === '';
+  const mobile = () => window.matchMedia('(max-width: 760px)').matches;
+  const villaHref = (p, u) => `#/project/${p.id}/villa/${u.id}`;
+  const pbar = (v) => h('span', { class: 'pbar' }, h('span', { style: { width: Math.round((v || 0) * 100) + '%' } }));
+  const statusChip = (U) => h('span', { class: 'chip st-' + U.replace(/\s/g, '-').toLowerCase() }, A.STATUS_AR[U]);
+
+  // إعادة الرسم عند التبديل بين الجوال والكمبيوتر
+  window.matchMedia('(max-width: 760px)').addEventListener('change', () => { if (location.hash.includes('/project/')) A.render(); });
 
   /* ---------- صفحة المشروع ---------- */
   A.views.project = {
@@ -31,71 +41,85 @@
       const p = projectOf(r.id);
       if (!p) return A.empty('المشروع غير موجود', '', h('a', { href: '#/home', class: 'btn' }, 'المشاريع'));
       const d = await A.loadProject(p.id);
+      if (r.tab === 'villa') {
+        const u = d.units.find((x) => x.id === r.sub);
+        return u ? villaPage(p, d, u) : A.empty('الفيلا غير موجودة', '', h('a', { href: `#/project/${p.id}/tracker`, class: 'btn' }, 'متابعة الفلل'));
+      }
       const tab = SHEETS.some((s) => s[0] === r.tab) ? r.tab : 'dashboard';
       const body = { dashboard: sheetDashboard, tracker: sheetTracker, tests: sheetTests, ncr: sheetNcr, guide: sheetGuide }[tab](p, d);
-
       return h('div', { class: 'book' },
         h('div', { class: 'book-head' },
           h('h1', null, p.client),
           h('div', { class: 'row' },
-            h('button', { type: 'button', class: 'btn sm', title: 'تحديث البيانات', onClick: async () => { await A.loadProject(p.id, true); A.render(); } }, '↻ تحديث'),
-            A.isStaff() ? h('button', { type: 'button', class: 'btn sm', onClick: () => importDialog(p) }, '⬆ استيراد Excel') : null,
-            h('button', { type: 'button', class: 'btn sm primary', onClick: () => exportExcel(p, d) }, '⬇ تصدير Excel'))),
-        h('nav', { class: 'sheet-tabs', 'aria-label': 'أوراق الملف' }, SHEETS.map(([k, en, ar]) =>
-          h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null },
-            h('span', null, ar), h('small', { dir: 'ltr' }, en)))),
+            A.isStaff() ? h('button', { type: 'button', class: 'btn sm', onClick: () => addVillas(p, d) }, '+ فلل') : null,
+            h('button', { type: 'button', class: 'btn sm', title: 'تحديث البيانات من الخادم', onClick: async () => { await A.loadProject(p.id, true); A.render(); } }, '↻ تحديث'),
+            A.isStaff() ? h('button', { type: 'button', class: 'btn sm', onClick: () => importDialog(p) }, 'استيراد Excel') : null,
+            h('button', { type: 'button', class: 'btn sm', onClick: () => exportExcel(p, d) }, 'تصدير Excel'))),
+        h('nav', { class: 'sheet-tabs', 'aria-label': 'أوراق المشروع' }, SHEETS.map(([k, ar, en]) =>
+          h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), title: en, 'aria-current': k === tab ? 'page' : null }, ar))),
         h('div', { class: 'sheet' }, body));
     }
   };
 
   /* ==========================================================
-     Dashboard
+     لوحة التحكم
      ========================================================== */
   function sheetDashboard(p, d) {
-    const D = F.dashboard(d, S.checkpoints);
-    const line = (label, en, val, cls = '') => h('tr', { class: cls }, h('th', null, label, h('small', { dir: 'ltr' }, en)), h('td', { class: 'calc' }, val));
-    return h('div', { class: 'stack' },
-      h('h2', { class: 'sheet-title' }, 'لوحة التحكم - فحص جودة تركيب VRF في الفلل'),
-      h('div', { class: 'dash' },
-        h('table', { class: 'xl dash-main' }, h('tbody', null,
-          line('عدد الفلل', 'Villas in tracker', num(D.B3)),
-          line('مكتملة بالكامل', 'Fully complete', num(D.B4)),
-          line('جارية', 'In progress', num(D.B5)),
-          line('لم تبدأ', 'Not started', num(D.B6)),
-          line('فلل فيها بند فاشل', 'Villas with a failed item', num(D.B7), D.B7 ? 'hot' : ''),
-          line('تنبيهات التسلسل', 'Sequence alerts', num(D.B8), D.B8 ? 'hot' : ''),
-          line('حالات NCR مفتوحة', 'Open NCRs', num(D.B9), D.B9 ? 'hot' : ''),
-          line('نسبة إنجاز الفحص الكلية', 'Overall inspection progress', A.pctText(D.B10), 'big'))),
-        h('div', { class: 'dash-ring', 'aria-hidden': 'true' }, ring(D.B10))),
-      h('h3', null, 'التقدم حسب نقطة الفحص'),
-      h('p', { class: 'muted small' }, 'الأرقام تُحسب من Villa Tracker. البند الفاشل أو المعلّق يوقف المرحلة التي بعده.'),
-      h('div', { class: 'table-wrap' }, h('table', { class: 'xl' },
-        h('thead', null, h('tr', null, h('th', null, 'نقطة الفحص'), h('th', null, 'Pass'), h('th', null, 'Fail'), h('th', null, 'Pending'), h('th', null, 'N/A'), h('th', null, '% النجاح (بدون N/A)'))),
-        h('tbody', null, D.per.map((x) => h('tr', null,
-          h('th', null, x.c.name_ar, h('small', { dir: 'ltr' }, x.c.name_en)),
-          h('td', { class: 'calc c-pass' }, num(x.Pass)), h('td', { class: 'calc' + (x.Fail ? ' c-fail' : '') }, num(x.Fail)),
-          h('td', { class: 'calc' }, num(x.Pending)), h('td', { class: 'calc' }, num(x['N/A'])),
-          h('td', { class: 'calc' }, h('div', { class: 'bar-cell' }, h('span', { class: 'bar' }, h('span', { style: { width: Math.round(x.pct * 100) + '%' } })), A.pctText(x.pct)))))))));
-  }
+    const cps = S.checkpoints;
+    const D = F.dashboard(d, cps);
+    const kpi = (label, val, cls = '', extra = null) => h('div', { class: 'kpi ' + cls }, h('span', null, label), h('strong', null, val), extra);
 
-  function ring(v) {
-    const p = Math.round((v || 0) * 1000) / 10;
-    const el = h('div', { class: 'ring' }, h('strong', null, p + '%'), h('small', null, 'الإنجاز الكلي'));
-    el.style.setProperty('--p', String(p));
-    return el;
+    // الفلل التي تحتاج انتباهاً: فشل، أو تنبيه تسلسل، أو NCR مفتوحة
+    const attn = [];
+    d.units.forEach((u) => {
+      const k = F.row(u, cps, A.openNcrsOf(d, u.id));
+      const why = [];
+      const failed = cps.filter((c) => u.results?.[c.key] === 'fail').map((c) => c.name_ar);
+      if (failed.length) why.push(h('span', { class: 'chip st-has-failure' }, 'فاشل: ' + failed.join('، ')));
+      if (k.W) why.push(h('span', { class: 'chip alert' }, 'تنبيه تسلسل'));
+      if (k.T) why.push(h('span', { class: 'chip' }, `${k.T} NCR مفتوحة`));
+      if (why.length) attn.push({ u, k, why });
+    });
+
+    return h('div', { class: 'stack' },
+      h('div', { class: 'kpis' },
+        kpi('الإنجاز الكلي', A.pctText(D.B10), 'main', pbar(D.B10)),
+        kpi('عدد الفلل', num(D.B3)),
+        kpi('مكتملة', num(D.B4), 'good'),
+        kpi('جارية', num(D.B5)),
+        kpi('لم تبدأ', num(D.B6), 'quiet'),
+        kpi('فيها بند فاشل', num(D.B7), D.B7 ? 'hot' : 'quiet'),
+        kpi('تنبيهات التسلسل', num(D.B8), D.B8 ? 'hot' : 'quiet'),
+        kpi('NCR مفتوحة', num(D.B9), D.B9 ? 'hot' : 'quiet')),
+      h('section', { class: 'panel' + (attn.length ? ' attn' : '') },
+        h('h2', null, attn.length ? `تحتاج انتباهك (${attn.length})` : 'لا توجد فلل تحتاج انتباهاً'),
+        attn.length
+          ? h('ul', { class: 'attn-list' }, attn.slice(0, 50).map(({ u, k, why }) => h('li', null,
+              h('a', { href: villaHref(p, u) }, h('b', null, u.code), h('span', { class: 'why' }, why), h('span', { class: 'muted small' }, 'التالي: ' + (k.V === '-' ? '—' : k.V.name_ar))))))
+          : h('p', { class: 'muted' }, 'لا فشل، ولا تنبيهات تسلسل، ولا NCR مفتوحة.')),
+      h('section', { class: 'panel' },
+        h('h2', null, 'التقدم حسب نقطة الفحص'),
+        h('p', { class: 'muted small' }, 'البند الفاشل أو المعلّق يوقف المرحلة التي بعده.'),
+        h('div', { class: 'table-wrap' }, h('table', { class: 'xl dash-table' },
+          h('thead', null, h('tr', null, h('th', null, 'نقطة الفحص'), h('th', null, 'ناجح'), h('th', null, 'فاشل'), h('th', null, 'معلّق'), h('th', null, 'لا ينطبق'), h('th', null, 'النجاح (بدون "لا ينطبق")'))),
+          h('tbody', null, D.per.map((x) => h('tr', null,
+            h('th', null, x.c.name_ar, h('small', { dir: 'ltr' }, x.c.itp_ref)),
+            h('td', { class: 'num c-pass' }, num(x.Pass)), h('td', { class: 'num' + (x.Fail ? ' c-fail' : '') }, num(x.Fail)),
+            h('td', { class: 'num muted' }, num(x.Pending)), h('td', { class: 'num muted' }, num(x['N/A'])),
+            h('td', null, h('div', { class: 'bar-cell' }, pbar(x.pct), h('span', null, A.pctText(x.pct)))))))))));
   }
 
   /* ==========================================================
-     Villa Tracker
+     متابعة الفلل
      ========================================================== */
   function sheetTracker(p, d) {
     const cps = S.checkpoints;
-    const staff = A.isStaff();
     const f = S._tf || (S._tf = { q: '', zone: '', crew: '', status: '', next: '' });
     const zones = [...new Set(d.units.map((u) => u.zone).filter(Boolean))].sort();
     const crews = [...new Set(d.units.map((u) => u.crew).filter(Boolean))].sort();
-    const tbody = h('tbody');
+    const box = h('div');
     const count = h('span', { class: 'muted small' });
+    const isMobile = mobile();
 
     const visible = (u, k) => (!f.q || u.code.toLowerCase().includes(f.q.toLowerCase()))
       && (!f.zone || u.zone === f.zone) && (!f.crew || u.crew === f.crew)
@@ -103,88 +127,169 @@
       && (!f.next || (f.next === '-' ? k.V === '-' : k.V !== '-' && k.V.key === f.next));
 
     const draw = () => {
-      clear(tbody);
-      let n = 0;
-      d.units.forEach((u, i) => {
-        const k = F.row(u, cps, A.openNcrsOf(d, u.id));
-        if (!visible(u, k)) return;
-        n++;
-        tbody.appendChild(trackerRow(p, d, u, i));
-      });
-      count.textContent = `${num(n)} من ${num(d.units.length)} فيلا`;
+      const list = d.units.map((u) => ({ u, k: F.row(u, cps, A.openNcrsOf(d, u.id)) })).filter(({ u, k }) => visible(u, k));
+      count.textContent = `${num(list.length)} من ${num(d.units.length)} فيلا`;
+      clear(box).appendChild(!list.length ? A.empty('لا توجد فلل مطابقة')
+        : isMobile ? villaCards(p, list) : trackerTable(p, d, list));
     };
     const sel = (key, label, opts) => h('select', { 'aria-label': label, onChange: (e) => { f[key] = e.target.value; draw(); } },
       h('option', { value: '' }, label), opts.map(([v, l]) => h('option', { value: v, selected: f[key] === v }, l)));
+    const filters = [
+      h('input', { type: 'search', placeholder: 'بحث برقم الفيلا', value: f.q, 'aria-label': 'بحث', onInput: (e) => { f.q = e.target.value; draw(); } }),
+      zones.length ? sel('zone', 'كل المناطق', zones.map((z) => [z, z])) : null,
+      crews.length ? sel('crew', 'كل الفرق', crews.map((z) => [z, z])) : null,
+      sel('status', 'كل الحالات', [['Has failure', 'فيها فشل'], ['alert', 'تنبيه تسلسل'], ['In progress', 'جارية'], ['Not started', 'لم تبدأ'], ['Complete', 'مكتملة']]),
+      sel('next', 'كل الخطوات التالية', cps.map((c) => [c.key, c.name_ar]).concat([['-', 'لا شيء (مكتملة)']]))
+    ];
+    const active = Object.values(f).filter(Boolean).length;
 
     draw();
     return h('div', { class: 'stack' },
-      h('div', { class: 'sheet-note' },
-        h('h2', { class: 'sheet-title' }, 'متابعة الفلل - سطر لكل فيلا'),
-        h('p', { class: 'muted small' }, staff ? 'اختر Pass / Fail / N/A / Pending في خانة كل نقطة فحص. الصف الأول يوضّح رقم بند ITP. الخانات الرمادية معادلات تُحسب تلقائياً.'
-          : 'عرض فقط. تغيير النتائج للمدير والمشرف.')),
-      h('div', { class: 'filters' },
-        h('input', { type: 'search', placeholder: 'بحث برقم الفيلا', value: f.q, 'aria-label': 'بحث', onInput: (e) => { f.q = e.target.value; draw(); } }),
-        zones.length ? sel('zone', 'Zone: الكل', zones.map((z) => [z, z])) : null,
-        crews.length ? sel('crew', 'Crew: الكل', crews.map((z) => [z, z])) : null,
-        sel('status', 'Status: الكل', [['Complete', 'Complete - مكتملة'], ['In progress', 'In progress - جارية'], ['Not started', 'Not started - لم تبدأ'], ['Has failure', 'Has failure - بها فشل'], ['alert', 'SEQUENCE ALERT']]),
-        sel('next', 'Next step: الكل', cps.map((c) => [c.key, c.name_en]).concat([['-', '- (مكتملة)']])),
-        count,
-        staff ? h('button', { type: 'button', class: 'btn sm', onClick: () => addVillas(p, d) }, '+ فلل') : null),
-      h('div', { class: 'xl-wrap' }, h('table', { class: 'xl tracker' },
-        h('thead', null,
-          h('tr', { class: 'itp' }, h('th', { class: 'stk' }), h('th'), h('th'), cps.map((c) => h('th', { dir: 'ltr' }, c.itp_ref)), h('th', { colspan: 9 })),
-          h('tr', null,
-            h('th', { class: 'stk' }, 'Villa'), h('th', null, 'Zone'), h('th', null, 'Crew'),
-            cps.map((c) => h('th', { class: 'cp', title: c.name_ar }, c.name_en)),
-            h('th', { class: 'f' }, 'Passed'), h('th', { class: 'f' }, 'Failed'), h('th', { class: 'f' }, '% complete'), h('th', { class: 'f' }, 'Open NCRs'),
-            h('th', { class: 'f' }, 'Status'), h('th', { class: 'f' }, 'Next step'), h('th', { class: 'f' }, 'Sequence alert'), h('th', null, 'Remarks'))),
-        tbody)),
-      h('div', { class: 'legend' }, RES_KEYS.map((k) => h('span', null, h('i', { class: 'sw r-' + k }), A.RES[k] + ' = ' + A.RES_AR[k]))));
+      isMobile
+        ? h('details', { class: 'filters-m', open: active > 0 }, h('summary', null, 'بحث وتصفية', active ? ` (${active})` : ''), h('div', { class: 'filters' }, filters))
+        : h('div', { class: 'filters' }, filters),
+      h('div', { class: 'row between' }, count,
+        isMobile ? null : h('div', { class: 'legend' }, RES_KEYS.map((k) => h('span', null, h('i', { class: 'sym r-' + k }, SYM[k]), A.RES_AR[k])))),
+      box,
+      !isMobile && A.isStaff() ? h('p', { class: 'muted small' }, 'اضغط أي خانة لتغيير نتيجتها، أو اضغط رقم الفيلا لفتح صفحتها.') : null);
   }
 
-  function trackerRow(p, d, u, i) {
+  function trackerTable(p, d, list) {
+    const cps = S.checkpoints;
+    const staff = A.isStaff();
+    return h('div', { class: 'xl-wrap' }, h('table', { class: 'xl tracker' },
+      h('thead', null,
+        h('tr', { class: 'itp' }, h('th', { class: 'stk' }), h('th'), h('th'), cps.map((c) => h('th', { dir: 'ltr' }, c.itp_ref)), h('th', { colspan: 8 })),
+        h('tr', null,
+          h('th', { class: 'stk' }, 'الفيلا'), h('th', null, 'المنطقة'), h('th', null, 'الفرقة'),
+          cps.map((c) => h('th', { class: 'cp', title: c.name_en }, c.name_ar)),
+          h('th', { class: 'f' }, 'ناجح'), h('th', { class: 'f' }, 'فاشل'), h('th', { class: 'f' }, 'الإنجاز'), h('th', { class: 'f' }, 'NCR'),
+          h('th', { class: 'f' }, 'الحالة'), h('th', { class: 'f' }, 'الخطوة التالية'), h('th', { class: 'f' }, 'تنبيه'), h('th', null, 'ملاحظات'))),
+      h('tbody', null, list.map(({ u, k }) => {
+        const tr = h('tr', { class: k.W ? 'alert-row' : '' },
+          h('td', { class: 'stk' }, h('a', { href: villaHref(p, u), class: 'vlink' }, u.code)),
+          h('td', null, u.zone || ''), h('td', null, u.crew || ''),
+          cps.map((c) => {
+            const r = u.results?.[c.key] || 'pending';
+            const label = `${u.code} · ${c.name_ar}: ${A.RES_AR[r]}`;
+            return h('td', { class: 'res' }, staff
+              ? h('button', { type: 'button', class: 'cell r-' + r, title: label, 'aria-label': label, onClick: () => pickResult(p, d, u, c) }, SYM[r])
+              : h('span', { class: 'cell r-' + r, title: label }, SYM[r]));
+          }),
+          h('td', { class: 'calc num' }, String(k.Q)),
+          h('td', { class: 'calc num' + (k.R ? ' c-fail' : '') }, String(k.R)),
+          h('td', { class: 'calc num' }, A.pctText(k.S)),
+          h('td', { class: 'calc num' + (k.T ? ' c-fail' : '') }, k.T ? String(k.T) : ''),
+          h('td', { class: 'calc' }, statusChip(k.U)),
+          h('td', { class: 'calc' }, k.V === '-' ? '—' : k.V.name_ar),
+          h('td', { class: 'calc' }, k.W ? h('span', { class: 'chip alert' }, 'تنبيه') : ''),
+          h('td', { class: 'rem', title: u.remarks || '' }, u.remarks || ''));
+        return tr;
+      }))));
+  }
+
+  function villaCards(p, list) {
+    return h('ul', { class: 'vcards' }, list.map(({ u, k }) => h('li', null, h('a', { href: villaHref(p, u), class: 'vcard' + (k.W || k.R ? ' warn' : '') },
+      h('div', { class: 'vc-top' }, h('b', null, u.code), statusChip(k.U), k.W ? h('span', { class: 'chip alert' }, 'تنبيه') : null),
+      h('div', { class: 'vc-bar' }, pbar(k.S), h('span', null, A.pctText(k.S))),
+      h('div', { class: 'muted small' }, 'التالي: ' + (k.V === '-' ? '—' : k.V.name_ar), u.zone ? ' · ' + u.zone : '', u.crew ? ' · ' + u.crew : '')))));
+  }
+
+  // اختيار نتيجة بأزرار كبيرة
+  function pickResult(p, d, u, c) {
+    const cur = u.results?.[c.key] || 'pending';
+    const set = async (v) => {
+      const ok = await saveResult(u, c, v);
+      if (ok) { document.getElementById('dialog').close(); A.render(); }
+    };
+    A.modal(`${u.code} · ${c.name_ar}`, h('div', { class: 'stack sm' },
+      h('p', { class: 'muted small', dir: 'ltr' }, c.itp_ref + ' · ' + c.name_en),
+      h('div', { class: 'pick4' }, RES_KEYS.map((v) => h('button', { type: 'button', class: 'pick r-' + v + (v === cur ? ' on' : ''), 'aria-pressed': String(v === cur), onClick: () => set(v) },
+        h('span', { class: 'sym' }, SYM[v]), A.RES_AR[v])))), []);
+  }
+
+  async function saveResult(u, c, v) {
+    const res = await S.sb.from('unit_checks').update({ result: v }).eq('unit_id', u.id).eq('checkpoint', c.key).select('result').maybeSingle();
+    if (res.error || !res.data) { A.fail(res.error || 'permission denied'); return false; }
+    u.results = { ...u.results, [c.key]: v };
+    return true;
+  }
+
+  /* ==========================================================
+     صفحة الفيلا
+     ========================================================== */
+  function villaPage(p, d, u) {
     const cps = S.checkpoints;
     const staff = A.isStaff();
     const k = F.row(u, cps, A.openNcrsOf(d, u.id));
-    const tr = h('tr', { class: k.W ? 'alert-row' : '' });
-    const refresh = () => {
-      const fresh = trackerRow(p, d, u, i);
-      tr.replaceWith(fresh);
-    };
-    const text = (key, max, cls) => staff
-      ? h('input', { class: 'cell-in ' + (cls || ''), value: u[key] || '', maxlength: max, 'aria-label': key, onChange: async (e) => {
-        const v = e.target.value.trim();
-        if (key === 'code' && !v) { e.target.value = u.code; return toast('رقم الفيلا مطلوب', 'error'); }
-        const r = await S.sb.from('units').update({ [key]: v || null }).eq('id', u.id).select().maybeSingle();
-        if (r.error || !r.data) { e.target.value = u[key] || ''; return A.fail(r.error || 'permission denied'); }
-        u[key] = r.data[key];
-      } })
-      : h('span', null, u[key] || '');
+    const i = d.units.indexOf(u);
+    const prev = d.units[i - 1], next = d.units[i + 1];
+    const t = d.tests.get(u.id) || {};
+    const c = F.test(t, p);
+    const ncrs = d.ncrs.filter((n) => n.unit_id === u.id);
 
-    tr.append(
-      h('td', { class: 'stk' }, text('code', 40, 'code')),
-      h('td', null, text('zone', 60)), h('td', null, text('crew', 60)),
-      ...cps.map((c) => {
-        const r = u.results?.[c.key] || 'pending';
-        if (!staff) return h('td', { class: 'res r-' + r }, A.RES[r]);
-        return h('td', { class: 'res r-' + r }, h('select', { 'aria-label': `${u.code} ${c.name_en}`, title: c.name_ar, onChange: async (e) => {
-          const v = e.target.value;
-          e.target.disabled = true;
-          const res = await S.sb.from('unit_checks').update({ result: v }).eq('unit_id', u.id).eq('checkpoint', c.key).select('result').maybeSingle();
-          if (res.error || !res.data) { A.fail(res.error || 'permission denied'); return refresh(); }
-          u.results = { ...u.results, [c.key]: v };
-          refresh();
-        } }, RES_KEYS.map((x) => h('option', { value: x, selected: x === r }, A.RES[x]))));
-      }),
-      h('td', { class: 'calc num' }, String(k.Q)),
-      h('td', { class: 'calc num' + (k.R ? ' c-fail' : '') }, String(k.R)),
-      h('td', { class: 'calc num' }, A.pctText(k.S)),
-      h('td', { class: 'calc num' + (k.T ? ' c-fail' : '') }, String(k.T)),
-      h('td', { class: 'calc st st-' + k.U.replace(/\s/g, '-').toLowerCase() }, k.U),
-      h('td', { class: 'calc', dir: 'ltr' }, k.V === '-' ? '-' : k.V.name_en),
-      h('td', { class: 'calc' }, k.W ? h('span', { class: 'seq' }, 'SEQUENCE ALERT') : ''),
-      h('td', { class: 'rem' }, text('remarks', 2000)));
-    return tr;
+    // شرح تنبيه التسلسل بنفس شروط معادلة الملف
+    const r = (key) => u.results?.[key] || 'pending';
+    const alerts = [];
+    if (r('insulation') === 'pass' && (r('pressure_test') !== 'pass' || r('vacuum') !== 'pass')) alerts.push('العزل ناجح قبل نجاح فحص الضغط والفاكيوم');
+    if (r('charging') === 'pass' && (r('pressure_test') !== 'pass' || r('vacuum') !== 'pass' || r('megger') !== 'pass')) alerts.push('شحن الفريون ناجح قبل نجاح الضغط والفاكيوم والميغر');
+    if (r('commissioning') === 'pass' && r('charging') !== 'pass') alerts.push('التشغيل التجريبي ناجح قبل نجاح شحن الفريون');
+
+    const info = staff ? (() => {
+      const f = { code: h('input', { value: u.code, maxlength: 40, dir: 'ltr' }), zone: h('input', { value: u.zone || '', maxlength: 60 }),
+        crew: h('input', { value: u.crew || '', maxlength: 60 }), remarks: h('textarea', { rows: 2, maxlength: 2000, value: u.remarks || '' }) };
+      const save = async () => {
+        if (!f.code.value.trim()) return toast('رقم الفيلا مطلوب', 'error');
+        const patch = { code: f.code.value.trim(), zone: f.zone.value.trim() || null, crew: f.crew.value.trim() || null, remarks: f.remarks.value.trim() || null };
+        const res = await S.sb.from('units').update(patch).eq('id', u.id).select().maybeSingle();
+        if (res.error || !res.data) return A.fail(res.error || 'permission denied');
+        Object.assign(u, patch); toast('تم الحفظ'); A.render();
+      };
+      return h('details', { class: 'panel' }, h('summary', null, 'بيانات الفيلا: ', [u.zone, u.crew].filter(Boolean).join(' · ') || 'بدون منطقة وفرقة'),
+        h('div', { class: 'form-grid' }, A.field('رقم الفيلا', f.code), A.field('المنطقة', f.zone), A.field('الفرقة', f.crew), A.field('ملاحظات', f.remarks, { wide: true })),
+        h('div', { class: 'row end' }, h('button', { type: 'button', class: 'btn primary', onClick: save }, 'حفظ')));
+    })() : (u.zone || u.crew || u.remarks ? h('p', { class: 'muted' }, [u.zone, u.crew, u.remarks].filter(Boolean).join(' · ')) : null);
+
+    const reading = (label, val, chk) => h('div', { class: 'rd' }, h('span', { class: 'muted small' }, label), h('b', null, blank(val) ? '—' : String(val)),
+      chk ? h('span', { class: 'chip ' + (chk === 'OK' ? 'st-complete' : 'st-has-failure') }, CHECK_AR[chk]) : null);
+
+    return h('div', { class: 'stack villa' },
+      h('div', { class: 'row between' },
+        h('a', { href: `#/project/${p.id}/tracker`, class: 'link' }, '→ متابعة الفلل'),
+        h('div', { class: 'row' },
+          prev ? h('a', { href: villaHref(p, prev), class: 'btn sm', 'aria-label': 'الفيلا السابقة' }, '→ ' + prev.code) : null,
+          next ? h('a', { href: villaHref(p, next), class: 'btn sm', 'aria-label': 'الفيلا التالية' }, next.code + ' ←') : null)),
+      h('section', { class: 'panel vhead' },
+        h('div', { class: 'row between' }, h('h1', null, u.code), statusChip(k.U)),
+        h('div', { class: 'vc-bar' }, pbar(k.S), h('b', null, A.pctText(k.S)), h('span', { class: 'muted small' }, `${k.Q} ناجح · ${k.R} فاشل`)),
+        h('p', null, 'الخطوة التالية: ', h('b', null, k.V === '-' ? '—' : k.V.name_ar)),
+        alerts.length ? h('div', { class: 'alert-box' }, h('b', null, 'تنبيه تسلسل: '), alerts.join('. ')) : null),
+      info,
+      h('section', { class: 'panel' }, h('h2', null, 'نقاط الفحص'),
+        h('ol', { class: 'cp-list' }, cps.map((cp) => {
+          const v = r(cp.key);
+          return h('li', { class: 'cp-row v-' + v },
+            h('div', { class: 'cp-name' }, h('span', { class: 'cp-n' }, String(cp.position)), h('div', null, h('b', null, cp.name_ar), h('small', { class: 'muted', dir: 'ltr' }, cp.itp_ref))),
+            staff
+              ? h('div', { class: 'seg4', role: 'group', 'aria-label': cp.name_ar }, RES_KEYS.map((x) => h('button', {
+                  type: 'button', class: 'r-' + x + (x === v ? ' on' : ''), 'aria-pressed': String(x === v),
+                  onClick: async () => { if (x !== v && await saveResult(u, cp, x)) A.render(); }
+                }, A.RES_AR[x])))
+              : h('span', { class: 'chip r-' + v }, A.RES_AR[v]));
+        }))),
+      h('section', { class: 'panel' },
+        h('div', { class: 'row between' }, h('h2', null, 'القراءات'), h('button', { type: 'button', class: 'btn sm primary', onClick: () => testForm(p, d, u) }, blank(t.unit_id) ? 'تسجيل قراءات' : 'تعديل القراءات')),
+        blank(t.unit_id) ? h('p', { class: 'muted' }, 'لا توجد قراءات بعد.') : h('div', { class: 'rds' },
+          reading('هبوط الضغط MPa', c.H, c.I), reading('الفاكيوم (مايكرون)', t.vacuum_microns, c.N),
+          reading('فرق الشحن', c.R === '' ? '' : A.pctText(c.R), c.S), reading('الفاحص', t.inspector))),
+      h('section', { class: 'panel' },
+        h('div', { class: 'row between' }, h('h2', null, `عدم المطابقة (${ncrs.length})`),
+          staff ? h('button', { type: 'button', class: 'btn sm', onClick: () => ncrForm(p, d, null, u, k.V === '-' ? null : k.V.key) }, '+ NCR') : null),
+        ncrs.length ? h('ul', { class: 'ncr-mini' }, ncrs.map((n) => h('li', null,
+          h('span', { class: 'chip ' + (n.status === 'open' ? 'st-has-failure' : 'st-complete') }, n.status === 'open' ? 'مفتوحة' : 'مغلقة'),
+          h('b', null, n.ncr_no), ' ', S.checkpoints.find((x) => x.key === n.checkpoint)?.name_ar, ': ', n.description,
+          staff ? h('button', { type: 'button', class: 'btn ghost sm', onClick: () => ncrForm(p, d, n) }, 'تعديل') : null)))
+          : h('p', { class: 'muted' }, 'لا توجد.')));
   }
 
   function addVillas(p, d) {
@@ -193,7 +298,7 @@
     const from = h('input', { type: 'number', min: 1, dir: 'ltr', value: last + 1 });
     const to = h('input', { type: 'number', min: 1, dir: 'ltr', value: last + 1 });
     const zone = h('input', { maxlength: 60 }), crew = h('input', { maxlength: 60 });
-    A.modal('إضافة فلل', h('div', { class: 'form-grid' }, A.field('البادئة', prefix), A.field('من', from), A.field('إلى', to), A.field('Zone', zone), A.field('Crew', crew)),
+    A.modal('إضافة فلل', h('div', { class: 'form-grid' }, A.field('البادئة', prefix), A.field('من رقم', from), A.field('إلى رقم', to), A.field('المنطقة', zone), A.field('الفرقة', crew)),
       [{ label: 'إضافة', cls: 'primary', run: async () => {
         const a = Number(from.value), b = Number(to.value);
         if (!(a >= 1 && b >= a && b - a < 2000)) { toast('تحقق من الأرقام', 'error'); return false; }
@@ -211,172 +316,184 @@
   }
 
   /* ==========================================================
-     Test Records
+     سجل الفحوصات
      ========================================================== */
-  const T_INPUTS = [
-    ['system_id', 'Outdoor unit / system ID', 'text'], ['pressure_date', 'Pressure test date', 'date'], ['test_pressure', 'Test pressure (MPa)', 'num'],
-    ['hold_hours', 'Hold (hours)', 'num'], ['start_mpa', 'Start (MPa)', 'num'], ['end_mpa', 'End (MPa)', 'num'],
-    ['=H', 'Drop (MPa)'], ['=I', 'Pressure check'],
-    ['vacuum_date', 'Vacuum date', 'date'], ['vacuum_microns', 'Vacuum reached (microns)', 'num'], ['vacuum_hold_min', 'Vacuum hold (min)', 'num'],
-    ['vacuum_rise', 'Vacuum rise (microns)', 'num'], ['=N', 'Vacuum check'],
-    ['charge_calc_kg', 'Calculated charge (kg)', 'num'], ['charge_actual_kg', 'Actual charge (kg)', 'num'],
-    ['=Q', 'Variance (kg)'], ['=R', 'Variance (%)'], ['=S', 'Charge check'],
-    ['cylinder_no', 'Cylinder no.', 'text'], ['inspector', 'Inspector', 'text']
-  ];
+  const T_FIELDS = {
+    system_id: ['الوحدة الخارجية / النظام', 'text'], pressure_date: ['تاريخ فحص الضغط', 'date'], test_pressure: ['ضغط الفحص (MPa)', 'num'],
+    hold_hours: ['مدة الثبات (ساعة)', 'num'], start_mpa: ['ضغط البداية (MPa)', 'num'], end_mpa: ['ضغط النهاية (MPa)', 'num'],
+    vacuum_date: ['تاريخ الفاكيوم', 'date'], vacuum_microns: ['الفاكيوم الواصل (مايكرون)', 'num'], vacuum_hold_min: ['ثبات الفاكيوم (دقيقة)', 'num'],
+    vacuum_rise: ['ارتفاع الفاكيوم (مايكرون)', 'num'], charge_calc_kg: ['الشحن المحسوب (كغ)', 'num'], charge_actual_kg: ['الشحن الفعلي (كغ)', 'num'],
+    cylinder_no: ['رقم الأسطوانة', 'text'], inspector: ['الفاحص', 'text']
+  };
+
+  function testForm(p, d, u) {
+    const t = d.tests.get(u.id) || {};
+    const el = {};
+    for (const [k, [, kind]] of Object.entries(T_FIELDS)) {
+      el[k] = h('input', { type: kind === 'num' ? 'number' : kind === 'date' ? 'date' : 'text', step: 'any', dir: 'ltr', inputmode: kind === 'num' ? 'decimal' : null, value: t[k] ?? '', maxlength: kind === 'text' ? 120 : null });
+    }
+    if (!t.unit_id && !el.inspector.value) el.inspector.value = S.profile.full_name || '';
+    const grp = (title, keys) => h('fieldset', { class: 'grp' }, h('legend', null, title), h('div', { class: 'form-grid' }, keys.map((k) => A.field(T_FIELDS[k][0], el[k]))));
+    A.modal(`قراءات ${u.code}`, h('div', { class: 'stack sm' },
+      grp('فحص الضغط', ['system_id', 'pressure_date', 'test_pressure', 'hold_hours', 'start_mpa', 'end_mpa']),
+      grp('الفاكيوم', ['vacuum_date', 'vacuum_microns', 'vacuum_hold_min', 'vacuum_rise']),
+      grp('شحن الفريون', ['charge_calc_kg', 'charge_actual_kg', 'cylinder_no']),
+      A.field('الفاحص', el.inspector)),
+    [{ label: 'حفظ', cls: 'primary', run: async () => {
+      const row = { unit_id: u.id };
+      for (const [k, [, kind]] of Object.entries(T_FIELDS)) {
+        const v = el[k].value.trim();
+        if (kind === 'num') {
+          if (v !== '' && !Number.isFinite(Number(v))) { toast(`قيمة غير صحيحة: ${T_FIELDS[k][0]}`, 'error'); return false; }
+          row[k] = v === '' ? null : Number(v);
+        } else row[k] = v || null;
+      }
+      const r = await S.sb.from('test_records').upsert(row, { onConflict: 'unit_id' }).select().single();
+      if (r.error) { A.fail(r.error); return false; }
+      d.tests.set(u.id, r.data);
+      const c = F.test(r.data, p);
+      const bad = [c.I === 'CHECK' && 'الضغط', c.N === 'CHECK' && 'الفاكيوم', c.S === 'CHECK' && 'الشحن'].filter(Boolean);
+      toast(bad.length ? `تم الحفظ. راجع: ${bad.join('، ')} (خارج الحدود)` : 'تم حفظ القراءات', bad.length ? 'error' : 'ok');
+      A.render();
+    } }]);
+  }
 
   function sheetTests(p, d) {
     const staff = A.isStaff();
+    const f = S._tt || (S._tt = { q: '' });
     const tbody = h('tbody');
-    const f = S._tt || (S._tt = { q: '', only: false });
+    const withData = () => d.units.filter((u) => d.tests.has(u.id));
     const draw = () => {
       clear(tbody);
-      d.units.forEach((u) => {
-        const t = d.tests.get(u.id);
-        if (f.q && !u.code.toLowerCase().includes(f.q.toLowerCase())) return;
-        if (f.only && !t) return;
-        tbody.appendChild(testRow(p, d, u));
-      });
+      const list = (f.q ? d.units.filter((u) => u.code.toLowerCase().includes(f.q.toLowerCase())) : withData());
+      list.forEach((u) => tbody.appendChild(testRow(p, d, u)));
+      if (!list.length) tbody.appendChild(h('tr', null, h('td', { colspan: 15, class: 'muted center' }, f.q ? 'لا توجد فيلا بهذا الرقم' : 'لا توجد قراءات بعد. ابحث عن فيلا لتسجيل قراءاتها.')));
     };
-    const lim = (key, label, step) => h('label', { class: 'yellow' }, h('span', null, label),
-      h('input', { type: 'number', step, min: 0, dir: 'ltr', value: p[key], disabled: !staff, 'aria-label': label, onChange: async (e) => {
-        const v = Number(e.target.value);
-        if (!(v >= 0) || e.target.value === '') { e.target.value = p[key]; return toast('قيمة غير صحيحة', 'error'); }
-        const r = await S.sb.from('projects').update({ [key]: v }).eq('id', p.id).select().maybeSingle();
-        if (r.error || !r.data) { e.target.value = p[key]; return A.fail(r.error || 'permission denied'); }
-        Object.assign(p, r.data); draw(); toast('تم تحديث الحد');
-      } }));
+    const lim = (key, label, step) => A.field(label, h('input', { type: 'number', step, min: 0, dir: 'ltr', value: p[key], disabled: !staff, onChange: async (e) => {
+      const v = Number(e.target.value);
+      if (!(v >= 0) || e.target.value === '') { e.target.value = p[key]; return toast('قيمة غير صحيحة', 'error'); }
+      const r = await S.sb.from('projects').update({ [key]: v }).eq('id', p.id).select().maybeSingle();
+      if (r.error || !r.data) { e.target.value = p[key]; return A.fail(r.error || 'permission denied'); }
+      Object.assign(p, r.data); draw(); summary.textContent = limText(); toast('تم تحديث الحد');
+    } }));
+    const limText = () => `حدود القبول: هبوط الضغط ≤ ${p.lim_pressure_drop} MPa · الفاكيوم ≤ ${p.lim_vacuum_max} مايكرون · الثبات ≥ ${p.lim_vacuum_hold} دقيقة · الارتفاع ≤ 50 · الشحن ±${Math.round(p.lim_charge_tol * 1000) / 10}%`;
+    const summary = h('span', null, limText());
     draw();
     return h('div', { class: 'stack' },
-      h('h2', { class: 'sheet-title' }, 'سجل الفحوصات - الضغط والفاكيوم وشحن الفريون لكل فيلا'),
-      h('div', { class: 'limits-row' },
-        lim('lim_pressure_drop', 'الهبوط المسموح بالضغط (MPa)', 0.001),
-        lim('lim_vacuum_max', 'هدف الفاكيوم (مايكرون، حد أعلى)', 1),
-        lim('lim_vacuum_hold', 'مدة ثبات الفاكيوم (دقيقة، حد أدنى)', 1),
-        lim('lim_charge_tol', 'سماحية الشحن (0.05 = 5%)', 0.005)),
-      h('p', { class: 'muted small' }, 'الخانات الصفراء حدود نموذجية أو مفترضة، وليست قواعد البراند الخاصة بكم: راجع كل واحدة مع كتالوج الشركة ونوع الفريون. حد هبوط الضغط يجب تعديله حسب تغيّر الحرارة أثناء الفحص. ارتفاع الفاكيوم المسموح 50 مايكرون (ثابت في معادلة الملف).'),
+      h('details', { class: 'limits' }, h('summary', null, summary, staff ? h('span', { class: 'link small' }, ' تعديل') : null),
+        h('div', { class: 'form-grid compact' },
+          lim('lim_pressure_drop', 'الهبوط المسموح (MPa)', 0.001), lim('lim_vacuum_max', 'الفاكيوم الأعلى (مايكرون)', 1),
+          lim('lim_vacuum_hold', 'أقل ثبات (دقيقة)', 1), lim('lim_charge_tol', 'سماحية الشحن (0.05 = 5%)', 0.005)),
+        h('p', { class: 'muted small' }, 'قيم نموذجية من الملف وليست قواعد البراند: راجعها مع كتالوج الشركة ونوع الفريون. حد هبوط الضغط يتأثر بتغيّر الحرارة أثناء الفحص.')),
       h('div', { class: 'filters' },
-        h('input', { type: 'search', placeholder: 'بحث برقم الفيلا', value: f.q, 'aria-label': 'بحث', onInput: (e) => { f.q = e.target.value; draw(); } }),
-        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: f.only, onChange: (e) => { f.only = e.target.checked; draw(); } }), h('span', null, 'الفلل التي لها قراءات فقط'))),
+        h('input', { type: 'search', placeholder: 'ابحث عن فيلا لتسجيل قراءاتها', value: f.q, 'aria-label': 'بحث', onInput: (e) => { f.q = e.target.value; draw(); } }),
+        h('span', { class: 'muted small' }, `${withData().length} فيلا لها قراءات`)),
       h('div', { class: 'xl-wrap' }, h('table', { class: 'xl tests' },
         h('thead', null,
-          h('tr', { class: 'grp' }, h('th', { class: 'stk' }), h('th'), h('th', { colspan: 7 }, 'فحص الضغط'), h('th', { colspan: 5 }, 'الفاكيوم'), h('th', { colspan: 5 }, 'شحن الفريون'), h('th', { colspan: 2 })),
-          h('tr', null, h('th', { class: 'stk' }, 'Villa'), T_INPUTS.map(([k, en]) => h('th', { class: k.startsWith('=') ? 'f' : '' }, en)))),
+          h('tr', { class: 'grp' }, h('th', { class: 'stk' }), h('th', { colspan: 5 }, 'فحص الضغط'), h('th', { colspan: 4 }, 'الفاكيوم'), h('th', { colspan: 4 }, 'شحن الفريون'), h('th')),
+          h('tr', null, h('th', { class: 'stk' }, 'الفيلا'),
+            h('th', null, 'التاريخ'), h('th', null, 'البداية'), h('th', null, 'النهاية'), h('th', { class: 'f' }, 'الهبوط'), h('th', { class: 'f' }, 'النتيجة'),
+            h('th', null, 'التاريخ'), h('th', null, 'مايكرون'), h('th', null, 'ثبات (د)'), h('th', { class: 'f' }, 'النتيجة'),
+            h('th', null, 'محسوب'), h('th', null, 'فعلي'), h('th', { class: 'f' }, 'الفرق'), h('th', { class: 'f' }, 'النتيجة'),
+            h('th', null, 'الفاحص'))),
         tbody)));
   }
 
   function testRow(p, d, u) {
     const t = d.tests.get(u.id) || {};
     const c = F.test(t, p);
-    const tr = h('tr');
-    const save = async (key, el, kind) => {
-      let v = el.value.trim();
-      if (kind === 'num') v = v === '' ? null : Number(v);
-      else v = v || null;
-      if (kind === 'num' && v !== null && !Number.isFinite(v)) { el.value = t[key] ?? ''; return toast('رقم غير صحيح', 'error'); }
-      const r = await S.sb.from('test_records').upsert({ unit_id: u.id, [key]: v }, { onConflict: 'unit_id' }).select().single();
-      if (r.error) { el.value = t[key] ?? ''; return A.fail(r.error); }
-      d.tests.set(u.id, r.data);
-      tr.replaceWith(testRow(p, d, u));
-    };
-    tr.append(h('td', { class: 'stk strong' }, u.code), ...T_INPUTS.map(([k, , kind]) => {
-      if (k.startsWith('=')) {
-        const v = c[k.slice(1)];
-        const shown = v === '' ? '' : k === '=R' ? (Math.round(v * 1000) / 10) + '%' : String(v);
-        return h('td', { class: 'calc num' + (v === 'CHECK' ? ' check' : v === 'OK' ? ' ok' : '') }, shown);
-      }
-      const el = h('input', { class: 'cell-in', type: kind === 'num' ? 'number' : kind === 'date' ? 'date' : 'text', step: 'any', dir: 'ltr',
-        value: t[k] ?? '', 'aria-label': `${u.code} ${k}`, maxlength: kind === 'text' ? 120 : null });
-      el.addEventListener('change', () => save(k, el, kind));
-      return h('td', null, el);
-    }));
-    return tr;
+    const chk = (v) => h('td', { class: 'calc ' + (v === 'CHECK' ? 'check' : v === 'OK' ? 'ok' : '') }, v ? CHECK_AR[v] : '');
+    const v = (x) => h('td', { class: 'num' }, blank(x) ? '' : String(x));
+    return h('tr', { class: 'clickable', title: 'اضغط لتسجيل أو تعديل القراءات', onClick: () => testForm(p, d, u) },
+      h('td', { class: 'stk' }, h('a', { href: villaHref(p, u), class: 'vlink', onClick: (e) => e.stopPropagation() }, u.code)),
+      v(t.pressure_date), v(t.start_mpa), v(t.end_mpa), h('td', { class: 'calc num' }, c.H === '' ? '' : String(c.H)), chk(c.I),
+      v(t.vacuum_date), v(t.vacuum_microns), v(t.vacuum_hold_min), chk(c.N),
+      v(t.charge_calc_kg), v(t.charge_actual_kg), h('td', { class: 'calc num' }, c.R === '' ? '' : A.pctText(c.R)), chk(c.S),
+      h('td', null, t.inspector || ''));
   }
 
   /* ==========================================================
-     NCR Register
+     عدم المطابقة (NCR)
      ========================================================== */
+  function ncrForm(p, d, n, presetUnit, presetCp) {
+    const cps = S.checkpoints;
+    const el = {
+      no: h('input', { value: n?.ncr_no || 'NCR-' + String(d.ncrs.length + 1).padStart(3, '0'), maxlength: 40, dir: 'ltr' }),
+      date: h('input', { type: 'date', dir: 'ltr', value: n?.date_raised || today() }),
+      villa: h('select', null, d.units.map((u) => h('option', { value: u.id, selected: u.id === (n?.unit_id || presetUnit?.id) }, u.code))),
+      cp: h('select', null, cps.map((c) => h('option', { value: c.key, selected: c.key === (n?.checkpoint || presetCp) }, c.name_ar))),
+      desc: h('textarea', { rows: 3, maxlength: 2000, value: n?.description || '', placeholder: 'مثال: هبوط الضغط 0.15 MPa خلال 24 ساعة، تسريب في الفلير' }),
+      resp: h('input', { maxlength: 120, value: n?.responsible || '' }),
+      due: h('input', { type: 'date', dir: 'ltr', value: n?.due_date || '' }),
+      status: h('select', null, h('option', { value: 'open', selected: (n?.status || 'open') === 'open' }, 'مفتوحة'), h('option', { value: 'closed', selected: n?.status === 'closed' }, 'مغلقة')),
+      closed: h('input', { type: 'date', dir: 'ltr', value: n?.date_closed || '' })
+    };
+    const actions = [{ label: n ? 'حفظ' : 'إضافة', cls: 'primary', run: async () => {
+      if (!el.desc.value.trim()) { toast('الوصف مطلوب', 'error'); return false; }
+      const row = { ncr_no: el.no.value.trim() || 'NCR', date_raised: el.date.value || today(), unit_id: el.villa.value, checkpoint: el.cp.value,
+        description: el.desc.value.trim(), responsible: el.resp.value.trim() || null, due_date: el.due.value || null,
+        status: el.status.value, date_closed: el.status.value === 'closed' ? (el.closed.value || today()) : null };
+      const r = n ? await S.sb.from('ncrs').update(row).eq('id', n.id).select().maybeSingle()
+        : await S.sb.from('ncrs').insert({ ...row, project_id: p.id }).select().single();
+      if (r.error || !r.data) { A.fail(r.error || 'permission denied'); return false; }
+      if (n) Object.assign(n, r.data); else d.ncrs.push(r.data);
+      toast(n ? 'تم الحفظ' : `تمت إضافة ${r.data.ncr_no}. اجعل البند "فاشل" في متابعة الفلل إن لم يكن كذلك.`);
+      A.render();
+    } }];
+    if (n && A.isAdmin()) actions.unshift({ label: 'حذف', cls: 'danger', run: async () => {
+      if (!await confirmBox({ title: 'حذف NCR', body: `حذف ${n.ncr_no} نهائياً؟`, okText: 'حذف', danger: true })) return false;
+      const r = await S.sb.from('ncrs').delete().eq('id', n.id);
+      if (r.error) { A.fail(r.error); return false; }
+      d.ncrs.splice(d.ncrs.indexOf(n), 1); A.render();
+    } });
+    A.modal(n ? `تعديل ${n.ncr_no}` : 'حالة عدم مطابقة جديدة', h('div', { class: 'form-grid' },
+      A.field('رقم NCR', el.no), A.field('تاريخ الفتح', el.date), A.field('الفيلا', el.villa), A.field('نقطة الفحص', el.cp),
+      A.field('الوصف', el.desc, { wide: true }), A.field('المسؤول عن الإصلاح', el.resp), A.field('موعد الإصلاح', el.due),
+      A.field('الحالة', el.status, { hint: 'أغلقها فقط بعد إعادة الفحص والتأكد من الإصلاح' }), A.field('تاريخ الإغلاق', el.closed)), actions);
+  }
+
   function sheetNcr(p, d) {
     const staff = A.isStaff();
-    const cps = S.checkpoints;
-    const code = Object.fromEntries(d.units.map((u) => [u.id, u.code]));
-    const f = S._nf || (S._nf = { status: '' });
+    const code = Object.fromEntries(d.units.map((u) => [u.id, u]));
+    const f = S._nf || (S._nf = { status: 'open' });
     const tbody = h('tbody');
-    const nextNo = () => 'NCR-' + String(d.ncrs.length + 1).padStart(3, '0');
-
-    const villaSel = (val, attrs = {}) => h('select', attrs, d.units.map((u) => h('option', { value: u.id, selected: u.id === val }, u.code)));
-    const cpSel = (val, attrs = {}) => h('select', attrs, cps.map((c) => h('option', { value: c.key, selected: c.key === val }, c.name_en)));
-
-    const rowOf = (n) => {
-      const upd = async (patch, el) => {
-        const r = await S.sb.from('ncrs').update(patch).eq('id', n.id).select().maybeSingle();
-        if (r.error || !r.data) { A.fail(r.error || 'permission denied'); return draw(); }
-        Object.assign(n, r.data); draw();
-      };
-      const overdue = n.status === 'open' && n.due_date && n.due_date < today();
-      if (!staff) {
-        return h('tr', { class: overdue ? 'overdue' : '' }, h('td', null, n.ncr_no), h('td', { dir: 'ltr' }, n.date_raised), h('td', null, code[n.unit_id]),
-          h('td', null, cps.find((c) => c.key === n.checkpoint)?.name_en), h('td', { class: 'desc' }, n.description), h('td', null, n.responsible || ''),
-          h('td', { dir: 'ltr' }, n.due_date || ''), h('td', { class: 'res ' + (n.status === 'open' ? 'r-fail' : 'r-pass') }, n.status === 'open' ? 'Open' : 'Closed'), h('td', { dir: 'ltr' }, n.date_closed || ''));
-      }
-      const inp = (key, type = 'text', cls = '') => h('input', { class: 'cell-in ' + cls, type, dir: type === 'date' ? 'ltr' : null, value: n[key] || '',
-        onChange: (e) => upd({ [key]: e.target.value.trim() || null }) });
-      return h('tr', { class: overdue ? 'overdue' : '' },
-        h('td', null, inp('ncr_no')), h('td', null, inp('date_raised', 'date')),
-        h('td', null, villaSel(n.unit_id, { onChange: (e) => upd({ unit_id: e.target.value }) })),
-        h('td', null, cpSel(n.checkpoint, { onChange: (e) => upd({ checkpoint: e.target.value }) })),
-        h('td', { class: 'desc' }, h('textarea', { class: 'cell-in', rows: 1, value: n.description, onChange: (e) => { if (!e.target.value.trim()) { e.target.value = n.description; return toast('الوصف مطلوب', 'error'); } upd({ description: e.target.value.trim() }); } })),
-        h('td', null, inp('responsible')), h('td', null, inp('due_date', 'date', overdue ? 'late' : '')),
-        h('td', { class: 'res ' + (n.status === 'open' ? 'r-fail' : 'r-pass') }, h('select', { onChange: (e) => upd({ status: e.target.value }) },
-          h('option', { value: 'open', selected: n.status === 'open' }, 'Open'), h('option', { value: 'closed', selected: n.status === 'closed' }, 'Closed'))),
-        h('td', null, inp('date_closed', 'date')),
-        A.isAdmin() ? h('td', null, h('button', { type: 'button', class: 'btn ghost sm', title: 'حذف', 'aria-label': 'حذف', onClick: async () => {
-          if (!await confirmBox({ title: 'حذف NCR', body: `حذف ${n.ncr_no}؟`, okText: 'حذف', danger: true })) return;
-          const r = await S.sb.from('ncrs').delete().eq('id', n.id);
-          if (r.error) return A.fail(r.error);
-          d.ncrs.splice(d.ncrs.indexOf(n), 1); draw();
-        } }, '✕')) : null);
-    };
-    function draw() {
+    const draw = () => {
       clear(tbody);
-      d.ncrs.filter((n) => !f.status || n.status === f.status).forEach((n) => tbody.appendChild(rowOf(n)));
-      if (!tbody.children.length) tbody.appendChild(h('tr', null, h('td', { colspan: 10, class: 'muted center' }, 'لا توجد حالات')));
-    }
-
-    // صف الإضافة
-    const nw = { no: h('input', { class: 'cell-in', value: nextNo() }), date: h('input', { class: 'cell-in', type: 'date', dir: 'ltr', value: today() }),
-      villa: villaSel(null), cp: cpSel(null), desc: h('textarea', { class: 'cell-in', rows: 1, placeholder: 'وصف الخلل' }),
-      resp: h('input', { class: 'cell-in', placeholder: 'المسؤول' }), due: h('input', { class: 'cell-in', type: 'date', dir: 'ltr' }) };
-    const add = async () => {
-      if (!nw.desc.value.trim()) return toast('اكتب الوصف', 'error');
-      const r = await S.sb.from('ncrs').insert({ project_id: p.id, ncr_no: nw.no.value.trim() || nextNo(), date_raised: nw.date.value || today(), unit_id: nw.villa.value,
-        checkpoint: nw.cp.value, description: nw.desc.value.trim(), responsible: nw.resp.value.trim() || null, due_date: nw.due.value || null }).select().single();
-      if (r.error) return A.fail(r.error);
-      d.ncrs.push(r.data);
-      toast(`تمت إضافة ${r.data.ncr_no}. غيّر البند في Villa Tracker إلى Fail إذا لم يكن كذلك.`);
-      A.render();
+      const list = d.ncrs.filter((n) => !f.status || n.status === f.status);
+      list.forEach((n) => {
+        const overdue = n.status === 'open' && n.due_date && n.due_date < today();
+        const u = code[n.unit_id];
+        tbody.appendChild(h('tr', { class: (overdue ? 'overdue ' : '') + (staff ? 'clickable' : ''), onClick: staff ? () => ncrForm(p, d, n) : null },
+          h('td', { class: 'strong', dir: 'ltr' }, n.ncr_no), h('td', { dir: 'ltr' }, n.date_raised),
+          h('td', null, u ? h('a', { href: villaHref(p, u), class: 'vlink', onClick: (e) => e.stopPropagation() }, u.code) : '—'),
+          h('td', null, S.checkpoints.find((c) => c.key === n.checkpoint)?.name_ar), h('td', { class: 'desc' }, n.description),
+          h('td', null, n.responsible || ''), h('td', { dir: 'ltr', class: overdue ? 'c-fail' : '' }, (n.due_date || '') + (overdue ? ' ⚠' : '')),
+          h('td', null, h('span', { class: 'chip ' + (n.status === 'open' ? 'st-has-failure' : 'st-complete') }, n.status === 'open' ? 'مفتوحة' : 'مغلقة')),
+          h('td', { dir: 'ltr' }, n.date_closed || '')));
+      });
+      if (!list.length) tbody.appendChild(h('tr', null, h('td', { colspan: 9, class: 'muted center' }, f.status === 'open' ? 'لا توجد حالات مفتوحة' : 'لا توجد حالات')));
     };
-
-    draw();
     const open = d.ncrs.filter((n) => n.status === 'open').length;
+    const overdue = d.ncrs.filter((n) => n.status === 'open' && n.due_date && n.due_date < today()).length;
+    draw();
     return h('div', { class: 'stack' },
-      h('h2', { class: 'sheet-title' }, 'سجل عدم المطابقة - كل بند فحص فاشل'),
-      h('p', { class: 'muted small' }, 'أضف سطراً لكل فشل. الحالة Open تُحسب على الفيلا في Villa Tracker. اجعلها Closed فقط بعد إعادة الفحص والتأكد من الإصلاح.'),
       h('div', { class: 'filters' },
-        h('select', { 'aria-label': 'Status', onChange: (e) => { f.status = e.target.value; draw(); } },
-          h('option', { value: '' }, 'Status: الكل'), h('option', { value: 'open', selected: f.status === 'open' }, 'Open'), h('option', { value: 'closed', selected: f.status === 'closed' }, 'Closed')),
-        h('span', { class: 'muted small' }, `${open} مفتوحة · ${d.ncrs.length - open} مغلقة`)),
+        h('select', { 'aria-label': 'الحالة', onChange: (e) => { f.status = e.target.value; draw(); } },
+          h('option', { value: 'open', selected: f.status === 'open' }, `المفتوحة (${open})`),
+          h('option', { value: 'closed', selected: f.status === 'closed' }, `المغلقة (${d.ncrs.length - open})`),
+          h('option', { value: '', selected: !f.status }, `الكل (${d.ncrs.length})`)),
+        overdue ? h('span', { class: 'chip st-has-failure' }, `${overdue} متأخرة عن موعدها`) : null,
+        staff && d.units.length ? h('button', { type: 'button', class: 'btn primary sm', onClick: () => ncrForm(p, d, null) }, '+ NCR جديدة') : null),
+      h('p', { class: 'muted small' }, 'سطر لكل فشل. "مفتوحة" تُحسب على الفيلا في متابعة الفلل. أغلقها فقط بعد إعادة الفحص والتأكد من الإصلاح.' + (staff ? ' اضغط أي سطر لتعديله.' : '')),
       h('div', { class: 'xl-wrap' }, h('table', { class: 'xl ncr' },
-        h('thead', null, h('tr', null, ['NCR no.', 'Date raised', 'Villa', 'Checkpoint', 'Description', 'Responsible', 'Due date', 'Status', 'Date closed'].map((x) => h('th', null, x)), A.isAdmin() ? h('th') : null)),
-        staff && d.units.length ? h('tbody', { class: 'new-row' }, h('tr', null,
-          h('td', null, nw.no), h('td', null, nw.date), h('td', null, nw.villa), h('td', null, nw.cp), h('td', { class: 'desc' }, nw.desc),
-          h('td', null, nw.resp), h('td', null, nw.due), h('td', { colspan: A.isAdmin() ? 3 : 2 }, h('button', { type: 'button', class: 'btn primary sm', onClick: add }, '+ إضافة')))) : null,
+        h('thead', null, h('tr', null, ['الرقم', 'تاريخ الفتح', 'الفيلا', 'نقطة الفحص', 'الوصف', 'المسؤول', 'الموعد', 'الحالة', 'تاريخ الإغلاق'].map((x) => h('th', null, x)))),
         tbody)));
   }
 
   /* ==========================================================
-     How to use
+     طريقة الاستخدام
      ========================================================== */
-  function sheetGuide(p, d) {
+  function sheetGuide(p) {
     const del = async () => {
       if (!await confirmBox({ title: 'حذف المشروع', body: `سيُحذف "${p.client}" مع كل الفلل والنتائج والقراءات وNCR نهائياً.`, okText: 'حذف نهائي', danger: true })) return;
       const r = await S.sb.from('projects').delete().eq('id', p.id);
@@ -392,28 +509,27 @@
       Object.assign(p, r.data); toast('تم تغيير الاسم');
     };
     return h('div', { class: 'stack guide' },
-      h('h2', { class: 'sheet-title' }, 'طريقة الاستخدام'),
       h('p', null, 'سطر واحد لكل فيلا. تحدّثه بعد كل فحص، ولوحة التحكم والتنبيهات تتحدث وحدها.'),
       h('h3', null, 'كيف يعمل'),
       h('ol', null,
         h('li', null, 'المقاول يطلب فحصاً (RFI) لفيلا ونقطة فحص، مثلاً: V-014 فحص الضغط.'),
-        h('li', null, 'تفحص حسب قائمة ITP لذلك البند (رقم البند فوق كل عمود في Villa Tracker).'),
-        h('li', null, 'افتح ', h('b', null, 'Villa Tracker'), '، جد الفيلا، واختر Pass أو Fail أو N/A أو Pending في عمود نقطة الفحص.'),
-        h('li', null, 'قراءات الضغط والفاكيوم والشحن تُسجَّل في ', h('b', null, 'Test Records'), '. الأعمدة الرمادية تُظهر CHECK إذا كانت القراءة خارج الحدود الصفراء.'),
-        h('li', null, 'إذا فشل أي بند، اجعله Fail وأضف سطراً في ', h('b', null, 'NCR Register'), '. أغلقه هناك فقط بعد إعادة الفحص والتأكد من الإصلاح.'),
-        h('li', null, h('b', null, 'Dashboard'), ' يعرض التقدم لكل نقطة فحص، والفلل التي فيها فشل، وتنبيهات التسلسل (مثل عزل Pass قبل فحص الضغط والفاكيوم).')),
-      h('h3', null, 'الألوان والخانات'),
-      h('p', null, h('i', { class: 'sw r-pass' }), ' أخضر = Pass، ', h('i', { class: 'sw r-fail' }), ' أحمر = Fail، ', h('i', { class: 'sw r-pending' }), ' أصفر فاتح = Pending، ',
-        h('i', { class: 'sw r-na' }), ' رمادي = N/A. الخانات الرمادية الفاتحة معادلات تُحسب تلقائياً، والخانات الصفراء حدود يمكن تغييرها.'),
+        h('li', null, 'تفحص حسب قائمة ITP لذلك البند (رقم البند فوق كل عمود في متابعة الفلل).'),
+        h('li', null, 'افتح ', h('b', null, 'متابعة الفلل'), ' واضغط الخانة، أو افتح صفحة الفيلا من الجوال، واختر: ناجح، فاشل، لا ينطبق، أو معلّق.'),
+        h('li', null, 'سجّل قراءات الضغط والفاكيوم والشحن في ', h('b', null, 'سجل الفحوصات'), '. يظهر "راجع" إذا كانت القراءة خارج الحدود.'),
+        h('li', null, 'إذا فشل أي بند، اجعله فاشلاً وأضف سطراً في ', h('b', null, 'عدم المطابقة'), '. أغلقه فقط بعد إعادة الفحص والتأكد من الإصلاح.'),
+        h('li', null, h('b', null, 'لوحة التحكم'), ' تعرض التقدم لكل نقطة فحص، والفلل التي تحتاج انتباهك، وتنبيهات التسلسل (مثل عزل ناجح قبل فحص الضغط والفاكيوم).')),
+      h('h3', null, 'الرموز'),
+      h('p', null, RES_KEYS.map((k) => h('span', { class: 'legend-item' }, h('i', { class: 'sym r-' + k }, SYM[k]), ' ' + A.RES_AR[k] + '  '))),
       h('h3', null, 'إعداد لمرة واحدة'),
       h('ol', { type: 'A' },
-        h('li', null, 'غيّر أرقام الفلل في Villa Tracker إلى أرقامكم الحقيقية (V-001 إلى V-250 أرقام مؤقتة)، واملأ Zone وCrew حتى تستطيع التصفية.'),
-        h('li', null, 'راجع الحدود الصفراء في Test Records مع كتالوج البراند ونوع الفريون. القيم الموجودة نموذجية وليست قواعد البراند.'),
-        h('li', null, 'إذا عندكم أكثر من 250 فيلا، اضغط "+ فلل" في Villa Tracker.'),
-        h('li', null, 'استخدم التصفية أعلى الجدول: حسب Crew لرؤية فرقة واحدة، أو Status لرؤية الفلل التي فيها فشل، أو Next step لتخطيط فحوصات الغد.')),
+        h('li', null, 'غيّر أرقام الفلل إلى أرقامكم الحقيقية من صفحة كل فيلا، واملأ المنطقة والفرقة حتى تستطيع التصفية.'),
+        h('li', null, 'راجع حدود القبول في سجل الفحوصات مع كتالوج البراند ونوع الفريون.'),
+        h('li', null, 'إذا عندكم فلل أكثر، اضغط "+ فلل".'),
+        h('li', null, 'استخدم التصفية: حسب الفرقة لرؤية فرقة واحدة، أو الحالة لرؤية الفلل التي فيها فشل، أو الخطوة التالية لتخطيط فحوصات الغد.')),
       h('h3', null, 'مثال'),
-      h('p', null, 'شهدت فحص الضغط في V-014: اختر Pass في Pressure test (Villa Tracker) وسجّل 4.00 بداية / 3.99 نهاية في Test Records. الفاكيوم ما زال Pending، فيظهر Next step = Vacuum. لا تسمح بالعزل حتى يصبح الفاكيوم Pass.'),
-      A.isStaff() ? h('section', { class: 'card' }, h('h3', null, 'إعدادات المشروع'),
+      h('p', null, 'شهدت فحص الضغط في V-014: اجعله "ناجح" وسجّل 4.00 بداية / 3.99 نهاية في سجل الفحوصات. الفاكيوم ما زال معلّقاً، فتظهر الخطوة التالية = الفاكيوم. لا تسمح بالعزل حتى ينجح الفاكيوم.'),
+      h('p', { class: 'muted small' }, 'ملف Excel المُصدَّر بالإنجليزية وبنفس معادلات وأوراق الملف الأصلي.'),
+      A.isStaff() ? h('section', { class: 'panel' }, h('h3', null, 'إعدادات المشروع'),
         A.field('اسم المشروع', h('input', { value: p.client, maxlength: 200, onChange: rename })),
         A.isAdmin() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn danger sm', onClick: del }, 'حذف المشروع')) : null) : null);
   }

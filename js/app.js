@@ -164,7 +164,7 @@
   /* ---------- التوجيه ---------- */
   function parseRoute() {
     const parts = (location.hash.replace(/^#\/?/, '') || '').split('/').map(decodeURIComponent);
-    return { name: parts[0] || 'home', id: parts[1] || null, tab: parts[2] || null };
+    return { name: parts[0] || 'home', id: parts[1] || null, tab: parts[2] || null, sub: parts[3] || null };
   }
   const go = (path) => { location.hash = '#/' + path; };
   window.addEventListener('hashchange', () => render());
@@ -209,7 +209,7 @@
       h('nav', { class: 'bar-nav' }, menu.map(([k, l]) => h('a', { href: '#/' + k, class: r.name === k ? 'on' : '', onClick: k === 'home' ? () => { state._stayHome = true; } : null }, l))),
       h('div', { class: 'bar-me' },
         h('span', { class: 'muted small' }, (state.profile.full_name || state.user.email) + ' · ' + ROLES[role()]),
-        h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, title: 'المظهر الفاتح/الداكن', 'aria-label': 'تبديل المظهر' }, '◐'),
+        h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, title: 'المظهر الفاتح/الداكن', 'aria-label': 'تبديل المظهر' }, 'المظهر'),
         h('button', { class: 'btn ghost sm', type: 'button', onClick: signOut }, 'خروج')));
   }
 
