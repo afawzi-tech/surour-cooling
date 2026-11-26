@@ -89,46 +89,75 @@
   function sheetDashboard(p, d) {
     const cps = S.checkpoints;
     const D = F.dashboard(d, cps);
-    const kpi = (label, val, cls = '', extra = null) => h('div', { class: 'kpi ' + cls }, h('span', null, label), h('strong', null, val), extra);
+    const rows = d.units.map((u) => ({ u, k: F.row(u, cps, A.openNcrsOf(d, u.id)) }));
+    const problem = (k) => k.R > 0 || k.T > 0;
+    const attn = rows.filter(({ k }) => problem(k) || k.W);
 
-    // الفلل التي تحتاج انتباهاً: فشل، أو تنبيه تسلسل، أو NCR مفتوحة
-    const attn = [];
-    d.units.forEach((u) => {
-      const k = F.row(u, cps, A.openNcrsOf(d, u.id));
-      const why = [];
-      const failed = cps.filter((c) => u.results?.[c.key] === 'fail').map((c) => c.name_ar);
-      if (failed.length) why.push(h('span', { class: 'chip st-has-failure' }, 'فاشل: ' + failed.join('، ')));
-      if (k.W) why.push(h('span', { class: 'chip alert' }, 'تنبيه تسلسل'));
-      if (k.T) why.push(h('span', { class: 'chip' }, `${k.T} NCR مفتوحة`));
-      if (why.length) attn.push({ u, k, why });
-    });
+    // درجة لون الفيلا في المخطط حسب نسبة الإنجاز (نفس معادلة % complete)
+    const band = (k) => (k.U === 'Complete' ? 'done' : k.S === 0 ? 'b0' : k.S < 0.25 ? 'b1' : k.S < 0.5 ? 'b2' : k.S < 0.75 ? 'b3' : 'b4');
+    const BANDS = [['b0', 'لم تبدأ'], ['b1', 'أقل من ربع'], ['b2', 'حتى النصف'], ['b3', 'حتى ثلاثة أرباع'], ['b4', 'قاربت'], ['done', 'مكتملة']];
+    const short = (code) => { const m = String(code).match(/(\d+)\s*$/); return m ? m[1] : String(code).slice(-3); };
+    const why = (k) => [k.R ? `${k.R} بند فاشل` : '', k.W ? 'تنبيه تسلسل' : '', k.T ? `${k.T} NCR مفتوحة` : ''].filter(Boolean).join('، ');
 
-    return h('div', { class: 'stack' },
-      h('div', { class: 'kpis' },
-        kpi('الإنجاز الكلي', A.pctText(D.B10), 'kpi-main', pbar(D.B10)),
-        kpi('عدد الفلل', num(D.B3)),
-        kpi('مكتملة', num(D.B4), 'good'),
-        kpi('جارية', num(D.B5)),
-        kpi('لم تبدأ', num(D.B6), 'quiet'),
-        kpi('فيها بند فاشل', num(D.B7), D.B7 ? 'hot' : 'quiet'),
-        kpi('تنبيهات التسلسل', num(D.B8), D.B8 ? 'hot' : 'quiet'),
-        kpi('NCR مفتوحة', num(D.B9), D.B9 ? 'hot' : 'quiet')),
-      h('section', { class: 'panel' + (attn.length ? ' attn' : '') },
-        h('h2', null, attn.length ? `تحتاج انتباهك (${attn.length})` : 'لا توجد فلل تحتاج انتباهاً'),
-        attn.length
-          ? h('ul', { class: 'attn-list' }, attn.slice(0, 50).map(({ u, k, why }) => h('li', null,
-              h('a', { href: villaHref(p, u) }, h('b', null, u.code), h('span', { class: 'why' }, why), h('span', { class: 'muted small' }, 'التالي: ' + (k.V === '-' ? '—' : k.V.name_ar))))))
-          : h('p', { class: 'muted' }, 'لا فشل، ولا تنبيهات تسلسل، ولا NCR مفتوحة.')),
-      h('section', { class: 'panel' },
-        h('h2', null, 'التقدم حسب نقطة الفحص'),
-        h('p', { class: 'muted small' }, 'البند الفاشل أو المعلّق يوقف المرحلة التي بعده.'),
-        h('div', { class: 'table-wrap' }, h('table', { class: 'xl dash-table' },
-          h('thead', null, h('tr', null, h('th', null, 'نقطة الفحص'), h('th', null, 'ناجح'), h('th', null, 'فاشل'), h('th', null, 'معلّق'), h('th', null, 'لا ينطبق'), h('th', null, 'النجاح (بدون "لا ينطبق")'))),
-          h('tbody', null, D.per.map((x) => h('tr', null,
-            h('th', null, x.c.name_ar, h('small', { dir: 'ltr' }, x.c.itp_ref)),
-            h('td', { class: 'num c-pass' }, num(x.Pass)), h('td', { class: 'num' + (x.Fail ? ' c-fail' : '') }, num(x.Fail)),
-            h('td', { class: 'num muted' }, num(x.Pending)), h('td', { class: 'num muted' }, num(x['N/A'])),
-            h('td', null, h('div', { class: 'bar-cell' }, pbar(x.pct), h('span', null, A.pctText(x.pct)))))))))));
+    // جملة الحال بدل صف أرقام
+    const started = D.B3 - D.B6;
+    const lead = D.B3 === 0 ? 'لا توجد فلل في هذا المشروع بعد.'
+      : `بدأ الفحص في ${num(started)} من ${num(D.B3)} فيلا، ` + (D.B4 ? `واكتملت ${num(D.B4)}.` : 'ولم تكتمل أي فيلا بعد.')
+        + (attn.length ? ` ${attn.length === 1 ? 'فيلا واحدة تحتاج' : num(attn.length) + ' فلل تحتاج'} انتباهك.` : ' لا شيء يحتاج انتباهك الآن.');
+
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const animateOnce = !reduce && !S._mapAnimated;   // لحظة الحركة الوحيدة: أول فتح للصفحة فقط
+    S._mapAnimated = true;
+    const map = h('div', { class: 'site-map' + (animateOnce ? ' animate' : ''), role: 'list', 'aria-label': 'مخطط المجمّع' },
+      rows.map(({ u, k }, i) => {
+        const b = band(k);
+        const flag = problem(k) ? ' flag-fail' : k.W ? ' flag-alert' : '';
+        const label = `${u.code}: ${A.STATUS_AR[k.U]}، ${A.pctText(k.S)}` + (why(k) ? `، ${why(k)}` : '') + (k.V !== '-' ? `. التالي: ${k.V.name_ar}` : '');
+        const tile = h('a', { href: villaHref(p, u), class: `tile ${b}${flag}`, role: 'listitem', title: label, 'aria-label': label },
+          b !== 'b0' || flag ? short(u.code) : '');
+        tile.style.setProperty('--i', String(i));
+        return tile;
+      }));
+
+    const mix = [['done', D.B4, 'مكتملة'], ['run', D.B5, 'جارية'], ['idle', D.B6, 'لم تبدأ']];
+    return h('div', { class: 'dash2' },
+      h('header', { class: 'd2-head' },
+        h('p', { class: 'd2-lead' }, lead),
+        h('div', { class: 'd2-pct', 'aria-label': `نسبة إنجاز الفحص الكلية ${A.pctText(D.B10)}` },
+          h('strong', null, A.pctText(D.B10)), h('span', null, 'من فحوصات المجمّع منجزة'))),
+      h('div', { class: 'd2-grid' },
+        h('section', { class: 'd2-plan', 'aria-labelledby': 'plan-h' },
+          h('div', { class: 'd2-plan-head' },
+            h('h2', { id: 'plan-h' }, 'مخطط المجمّع'),
+            h('span', { class: 'd2-note' }, 'اضغط أي فيلا لفتحها')),
+          map,
+          h('div', { class: 'd2-legend' },
+            h('div', { class: 'ramp', 'aria-hidden': 'true' }, BANDS.map(([c]) => h('i', { class: 'tile ' + c }))),
+            h('div', { class: 'ramp-labels' }, h('span', null, 'لم تبدأ'), h('span', null, 'مكتملة')),
+            h('div', { class: 'flags' },
+              h('span', null, h('i', { class: 'tile b1 flag-fail' }), 'بند فاشل أو NCR مفتوحة'),
+              h('span', null, h('i', { class: 'tile b1 flag-alert' }), 'تنبيه تسلسل')))),
+        h('aside', { class: 'd2-side' },
+          h('section', { class: 'd2-attn' + (attn.length ? ' has' : '') },
+            h('h2', null, 'تحتاج انتباهك'),
+            attn.length
+              ? h('ul', null, attn.slice(0, 30).map(({ u, k }) => h('li', null, h('a', { href: villaHref(p, u) },
+                  h('b', null, u.code), h('span', { class: 'why' + (problem(k) ? '' : ' alert') }, why(k)), h('span', { class: 'nx' }, k.V === '-' ? '' : 'التالي: ' + k.V.name_ar)))))
+              : h('p', { class: 'calm' }, 'لا فشل ولا تنبيهات ولا NCR مفتوحة.')),
+          h('section', { class: 'd2-mix' },
+            h('h2', null, 'حالة الفلل'),
+            h('div', { class: 'mixbar', role: 'img', 'aria-label': mix.map(([, v, l]) => `${l} ${v}`).join('، ') },
+              mix.filter(([, v]) => v > 0).map(([c, v]) => { const s2 = h('span', { class: c }); s2.style.flexGrow = String(v); return s2; })),
+            h('dl', null, mix.concat([['fail', D.B7, 'فيها بند فاشل'], ['alert', D.B8, 'تنبيهات تسلسل'], ['ncr', D.B9, 'NCR مفتوحة']]).map(([c, v, l]) =>
+              h('div', { class: 'mix-' + c + (v && ['fail', 'alert', 'ncr'].includes(c) ? ' hot' : '') }, h('dt', null, l), h('dd', null, num(v)))))))),
+      h('section', { class: 'd2-route', 'aria-labelledby': 'route-h' },
+        h('h2', { id: 'route-h' }, 'مسار الفحص'),
+        h('p', { class: 'd2-note' }, 'عدد الفلل التي نجحت في كل مرحلة، بالترتيب. المرحلة الفاشلة أو المعلّقة توقف ما بعدها.'),
+        h('ol', null, D.per.map((x) => h('li', { class: x.Fail ? 'has-fail' : '' },
+          h('span', { class: 'st-n' }, String(x.c.position)),
+          h('span', { class: 'st-name' }, x.c.name_ar, h('small', { dir: 'ltr' }, x.c.itp_ref)),
+          h('span', { class: 'st-bar', 'aria-hidden': 'true' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })),
+          h('span', { class: 'st-count' }, h('b', null, num(x.Pass)), x.Fail ? h('em', null, `${x.Fail} فاشل`) : null))))));
   }
 
   /* ==========================================================
