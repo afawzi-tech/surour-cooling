@@ -114,7 +114,7 @@
         const flag = problem(k) ? ' flag-fail' : k.W ? ' flag-alert' : '';
         const label = `${u.code}: ${A.STATUS_AR[k.U]}، ${A.pctText(k.S)}` + (why(k) ? `، ${why(k)}` : '') + (k.V !== '-' ? `. التالي: ${k.V.name_ar}` : '');
         const tile = h('a', { href: villaHref(p, u), class: `tile ${b}${flag}`, role: 'listitem', title: label, 'aria-label': label },
-          b !== 'b0' || flag ? short(u.code) : '');
+          short(u.code));
         tile.style.setProperty('--i', String(i));
         return tile;
       }));
@@ -125,6 +125,10 @@
         h('p', { class: 'd2-lead' }, lead),
         h('div', { class: 'd2-pct', 'aria-label': `نسبة إنجاز الفحص الكلية ${A.pctText(D.B10)}` },
           h('strong', null, A.pctText(D.B10)), h('span', null, 'من فحوصات المجمّع منجزة'))),
+      h('dl', { class: 'd2-stats' }, [
+        ['مكتملة', D.B4, 'ok'], ['جارية', D.B5, ''], ['لم تبدأ', D.B6, 'muted'],
+        ['فيها بند فاشل', D.B7, D.B7 ? 'bad' : 'muted'], ['تنبيهات تسلسل', D.B8, D.B8 ? 'warn' : 'muted'], ['NCR مفتوحة', D.B9, D.B9 ? 'bad' : 'muted']
+      ].map(([l, v, c]) => h('div', { class: 'st ' + c }, h('dd', null, num(v)), h('dt', null, l)))),
       h('div', { class: 'd2-grid' },
         h('section', { class: 'd2-plan', 'aria-labelledby': 'plan-h' },
           h('div', { class: 'd2-plan-head' },
@@ -148,8 +152,7 @@
             h('h2', null, 'حالة الفلل'),
             h('div', { class: 'mixbar', role: 'img', 'aria-label': mix.map(([, v, l]) => `${l} ${v}`).join('، ') },
               mix.filter(([, v]) => v > 0).map(([c, v]) => { const s2 = h('span', { class: c }); s2.style.flexGrow = String(v); return s2; })),
-            h('dl', null, mix.concat([['fail', D.B7, 'فيها بند فاشل'], ['alert', D.B8, 'تنبيهات تسلسل'], ['ncr', D.B9, 'NCR مفتوحة']]).map(([c, v, l]) =>
-              h('div', { class: 'mix-' + c + (v && ['fail', 'alert', 'ncr'].includes(c) ? ' hot' : '') }, h('dt', null, l), h('dd', null, num(v)))))))),
+            h('ul', { class: 'mix-key' }, mix.map(([c, v, l]) => h('li', null, h('i', { class: c }), `${l}: ${num(v)}`)))))),
       h('section', { class: 'd2-route', 'aria-labelledby': 'route-h' },
         h('h2', { id: 'route-h' }, 'مسار الفحص'),
         h('p', { class: 'd2-note' }, 'عدد الفلل التي نجحت في كل مرحلة، بالترتيب. المرحلة الفاشلة أو المعلّقة توقف ما بعدها.'),

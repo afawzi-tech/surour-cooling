@@ -556,3 +556,26 @@ a.tile:focus-visible { outline: 3px solid var(--survey); outline-offset: 2px; po
   .flags { grid-column: 1; grid-row: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .site-map .tile { animation: none !important; } }
+
+/* أرقام الحالة الواضحة + رقم على كل فيلا */
+.d2-stats { margin: -6px 0 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--grid); }
+.d2-stats .st { display: flex; flex-direction: column; gap: 2px; padding: 4px 16px 16px; border-inline-start: 1px solid var(--grid); }
+.d2-stats .st:first-child { border-inline-start: 0; padding-inline-start: 0; }
+.d2-stats dd { margin: 0; font-family: var(--f-head); font-size: clamp(1.6rem, 3.4vw, 2.4rem); font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--ink); }
+.d2-stats dt { font-size: .9rem; color: var(--ink-2); font-weight: 500; }
+.d2-stats .ok dd { color: var(--ok); }
+.d2-stats .muted dd { color: var(--ink-2); opacity: .75; }
+.d2-stats .bad dd, .d2-stats .bad dt { color: var(--bad); }
+.d2-stats .warn dd, .d2-stats .warn dt { color: var(--survey); }
+.d2-lead { font-size: clamp(1.05rem, 2vw, 1.35rem); }
+.tile.b0 { color: var(--ink-2); font-weight: 500; opacity: .8; }
+.mix-key { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: .9rem; }
+.mix-key li { display: flex; align-items: center; gap: 8px; }
+.mix-key i { width: 12px; height: 12px; display: inline-block; }
+.mix-key i.done { background: var(--ok); } .mix-key i.run { background: var(--t3); } .mix-key i.idle { background: var(--t1); }
+@media (max-width: 760px) {
+  .d2-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 4px; }
+  .d2-stats .st { padding: 6px 10px 10px; }
+  .d2-stats .st:nth-child(3n+1) { border-inline-start: 0; padding-inline-start: 0; }
+  .tile { font-size: .6rem; }
+}
