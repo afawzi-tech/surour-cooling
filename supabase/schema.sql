@@ -423,6 +423,60 @@ alter table public.projects drop column if exists size_m2;
 alter table public.projects drop column if exists floors;
 
 -- ==========================================================
+-- مراحل العمل على مستوى المشروع (للمشاريع غير المجمّعات)
+-- نفس المراحل الـ13، لكل مرحلة: الحالة وتاريخ البدء والانتهاء والكوادر والملاحظات
+-- ==========================================================
+create table if not exists public.project_stages (
+  project_id  uuid not null references public.projects (id) on delete cascade,
+  checkpoint  text not null references public.qc_checkpoints (key) on update cascade,
+  status      text not null default 'not_started' check (status in ('not_started', 'in_progress', 'done', 'na')),
+  start_date  date,
+  end_date    date,
+  crew        integer check (crew is null or crew between 0 and 500),
+  notes       text check (char_length(notes) <= 2000),
+  updated_by  uuid references public.profiles (id) on delete set null default auth.uid(),
+  updated_at  timestamptz not null default now(),
+  primary key (project_id, checkpoint),
+  check (end_date is null or start_date is null or end_date >= start_date)
+);
+
+-- التواريخ التلقائية: "جارية" تملأ تاريخ البدء، و"مكتملة" تملأ تاريخ الانتهاء
+create or replace function public.project_stage_stamp()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if new.status = 'not_started' then
+    new.start_date := null; new.end_date := null;
+  elsif new.status = 'in_progress' then
+    new.start_date := coalesce(new.start_date, current_date); new.end_date := null;
+  elsif new.status = 'done' then
+    new.end_date := coalesce(new.end_date, current_date);
+    new.start_date := coalesce(new.start_date, least(new.end_date, current_date));
+  end if;
+  new.updated_by := auth.uid();
+  new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists project_stages_stamp on public.project_stages;
+create trigger project_stages_stamp before insert or update on public.project_stages
+  for each row execute function public.project_stage_stamp();
+
+drop trigger if exists audit_project_stages on public.project_stages;
+create trigger audit_project_stages after insert or update or delete on public.project_stages
+  for each row execute function public.write_audit();
+
+alter table public.project_stages enable row level security;
+revoke all on public.project_stages from anon;
+grant select, insert, update, delete on public.project_stages to authenticated;
+drop policy if exists stages_select on public.project_stages;
+create policy stages_select on public.project_stages for select to authenticated using (public.app_role() is not null);
+drop policy if exists stages_insert on public.project_stages;
+create policy stages_insert on public.project_stages for insert to authenticated with check (public.is_staff());
+drop policy if exists stages_update on public.project_stages;
+create policy stages_update on public.project_stages for update to authenticated using (public.is_staff()) with check (public.is_staff());
+drop policy if exists stages_delete on public.project_stages;
+create policy stages_delete on public.project_stages for delete to authenticated using (public.is_admin());
+
+-- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:
 --   update public.profiles set role = 'admin'
 --   where id = (select id from auth.users where email = 'you@example.com');

@@ -37,12 +37,13 @@
   const RES_AR = { pass: 'ناجح', fail: 'فاشل', pending: 'معلّق', na: 'لا ينطبق' };
   const STATUS_AR = { 'Complete': 'مكتملة', 'In progress': 'جارية', 'Not started': 'لم تبدأ', 'Has failure': 'بها فشل' };
   const TABLES = { profiles: 'المستخدمون', projects: 'المشاريع', units: 'Villa Tracker', unit_checks: 'Villa Tracker',
-    test_records: 'Test Records', ncrs: 'NCR Register', materials: 'المواد' };
+    test_records: 'Test Records', ncrs: 'NCR Register', materials: 'المواد', project_stages: 'مراحل العمل' };
   const ACTIONS = { INSERT: 'إضافة', UPDATE: 'تعديل', DELETE: 'حذف' };
 
   const state = {
     sb: null, user: null, profile: null,
     projects: [], checkpoints: [],
+    stages: {},       // لكل مشروع: { checkpoint: صف المرحلة }
     data: {}          // لكل مشروع: { units, tests: Map(unit_id), ncrs }
   };
   const role = () => state.profile?.role;
@@ -136,13 +137,30 @@
   }
 
   async function loadBase() {
-    const [projects, cps] = await Promise.all([
+    const [projects, cps, stages] = await Promise.all([
       state.sb.from('projects').select('*').order('created_at'),
-      state.sb.from('qc_checkpoints').select('*').order('position')]);
+      state.sb.from('qc_checkpoints').select('*').order('position'),
+      fetchAll((a, b) => state.sb.from('project_stages').select('*').range(a, b))]);
     if (projects.error) throw projects.error;
     if (cps.error) throw cps.error;
     state.projects = projects.data;
     state.checkpoints = cps.data;
+    state.stages = {};
+    stages.forEach((x) => { (state.stages[x.project_id] ||= {})[x.checkpoint] = x; });
+  }
+
+  /* ---------- مراحل العمل على مستوى المشروع ---------- */
+  const STAGE_AR = { not_started: 'لم تبدأ', in_progress: 'جارية', done: 'مكتملة', na: 'لا تنطبق' };
+  const stageOf = (p, key) => state.stages[p.id]?.[key] || { project_id: p.id, checkpoint: key, status: 'not_started' };
+  // التقدّم: المكتملة ÷ (13 − لا تنطبق)، والمرحلة الحالية = أول مرحلة غير مكتملة
+  function stageProgress(p) {
+    const list = state.checkpoints.map((c) => ({ c, s: stageOf(p, c.key) }));
+    const active = list.filter((x) => x.s.status !== 'na');
+    const done = active.filter((x) => x.s.status === 'done').length;
+    const cur = active.find((x) => x.s.status === 'in_progress') || active.find((x) => x.s.status !== 'done') || null;
+    const status = active.length && done === active.length ? 'done' : list.some((x) => x.s.status === 'in_progress' || x.s.status === 'done') ? 'in_progress' : 'not_started';
+    const last = list.map((x) => x.s.updated_at).filter(Boolean).sort().pop() || null;
+    return { list, done, total: active.length, pct: active.length ? done / active.length : 0, cur, status, last };
   }
 
   async function loadProject(id, force = false) {
@@ -205,7 +223,7 @@
     document.title = title + ' | مصاعد السرور';
 
     const main = h('main', { class: 'main' });
-    root.appendChild(h('div', { class: 'app' }, topbar(r), main));
+    root.appendChild(h('div', { class: 'app app-side' }, ...topbar(r).filter(Boolean), main));
     const out = v.render(r);
     if (out instanceof Promise) {
       main.appendChild(h('div', { class: 'loading' }, 'جارٍ التحميل…'));
@@ -213,6 +231,22 @@
     } else main.appendChild(out);
   }
 
+  // القائمة الجانبية (يمين الشاشة) على الكمبيوتر، وشريط سفلي على الهاتف
+  const ICONS = {
+    home: ['M3 11l9-7 9 7', 'M5 10v10h14V10', 'M10 20v-6h4v6'],
+    compounds: ['M3 3h7v7H3z', 'M14 3h7v7h-7z', 'M3 14h7v7H3z', 'M14 14h7v7h-7z'],
+    users: ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M2 21c0-4 3-6 7-6s7 2 7 6', 'M17 4a3.5 3.5 0 0 1 0 7', 'M19 15c2 .6 3 2.5 3 6'],
+    audit: ['M4 4h16v16H4z', 'M8 9h8', 'M8 13h8', 'M8 17h5'],
+    backup: ['M12 3v12', 'M7 10l5 5 5-5', 'M4 19h16'],
+    more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
+  };
+  function icon(k) {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', 'ico');
+    (ICONS[k] || []).forEach((d) => { const path = document.createElementNS(NS, 'path'); path.setAttribute('d', d); svg.appendChild(path); });
+    return svg;
+  }
   function topbar(r) {
     const p = r.name === 'project' ? state.projects.find((x) => x.id === r.id) : null;
     const navOn = p && isCompound(p) ? 'compounds' : p ? 'home' : r.name;
@@ -223,21 +257,31 @@
       ['audit', 'سجل العمليات', isAdmin()],
       ['backup', 'نسخة احتياطية', isStaff()]
     ].filter((x) => x[2]);
-    const header = h('header', { class: 'bar' },
-      h('a', { href: '#/home', class: 'logo', onClick: () => { state._stayHome = true; } },
-        logo(), h('span', { class: 'logo-text' }, 'متابعة الجودة')),
-      p ? h('span', { class: 'crumb' }, p.client) : null,
-      h('button', { type: 'button', class: 'btn ghost menu-btn', 'aria-label': 'القائمة', 'aria-expanded': 'false', onClick: (e) => {
-        const open = header.classList.toggle('open');
-        e.currentTarget.setAttribute('aria-expanded', String(open));
-      } }, '☰'),
-      h('div', { class: 'bar-menu' },
-        h('nav', { class: 'bar-nav' }, menu.map(([k, l]) => h('a', { href: '#/' + k, class: navOn === k ? 'on' : '', onClick: k === 'home' ? () => { state._stayHome = true; } : null }, l))),
-        h('div', { class: 'bar-me' },
-          h('span', { class: 'muted small' }, (state.profile.full_name || state.user.email) + ' · ' + ROLES[role()]),
-          h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, title: 'المظهر الفاتح/الداكن', 'aria-label': 'تبديل المظهر' }, 'المظهر'),
-          h('button', { class: 'btn ghost sm', type: 'button', onClick: signOut }, 'خروج'))));
-    return header;
+    const stay = (k) => (k === 'home' ? () => { state._stayHome = true; } : null);
+    const link = ([k, l]) => h('a', { href: '#/' + k, class: navOn === k ? 'on' : '', 'aria-current': navOn === k ? 'page' : null, onClick: stay(k) }, icon(k), h('span', null, l));
+    const me = h('div', { class: 'side-me' },
+      h('span', { class: 'who' }, h('b', null, state.profile.full_name || state.user.email), h('small', null, ROLES[role()])),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, 'aria-label': 'تبديل المظهر' }, 'المظهر'),
+        h('button', { class: 'btn ghost sm', type: 'button', onClick: signOut }, 'خروج')));
+    // الهاتف: المشاريع والمجمّعات، والباقي تحت "المزيد"
+    const rest = menu.slice(2);
+    const more = h('details', { class: 'mb-more' },
+      h('summary', { class: rest.some(([k]) => k === navOn) ? 'on' : '' }, icon('more'), h('span', null, 'المزيد')),
+      h('div', { class: 'mb-sheet' }, rest.map(link), me.cloneNode(true)));
+    // cloneNode لا ينسخ الأحداث: نعيد ربط أزرار المظهر والخروج في نسخة الهاتف
+    const btns = more.querySelectorAll('.side-me button');
+    btns[0].onclick = toggleTheme; btns[1].onclick = signOut;
+    return [
+      h('aside', { class: 'side', 'aria-label': 'القائمة الرئيسية' },
+        h('a', { href: '#/home', class: 'side-logo', onClick: stay('home') }, logo(), h('span', null, 'متابعة المشاريع')),
+        h('nav', { class: 'side-nav' }, menu.map(link)),
+        p ? h('div', { class: 'side-proj' }, h('small', null, 'المشروع المفتوح'), h('a', { href: '#/project/' + p.id }, p.client)) : null,
+        me),
+      h('header', { class: 'mtop' }, h('a', { href: '#/home', onClick: stay('home') }, logo()), p ? h('span', { class: 'mtop-crumb' }, p.client) : null),
+      // في صفحات المجمّع يظهر شريط المجمّع السفلي بدل هذا
+      p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 2).map(link), rest.length ? more : null)
+    ];
   }
 
   function applyTheme() {
@@ -272,7 +316,7 @@
     return h('div', { class: 'auth2' },
       h('section', { class: 'auth-brand' }, pattern,
         h('div', { class: 'auth-brand-in' }, logo('big'),
-          h('p', null, 'متابعة فحص جودة تركيب منظومات التبريد في كل مشاريع سرور، وحدة وحدة ومرحلة مرحلة.'))),
+          h('p', null, 'إدارة مشاريع تركيب منظومات التبريد في سرور، ومتابعة كل مشروع مرحلة مرحلة.'))),
       h('form', { class: 'auth-form', onSubmit: async (e) => {
         e.preventDefault(); err.textContent = ''; btn.disabled = true; btn.textContent = 'جارٍ الدخول…';
         const { error } = await state.sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
@@ -320,8 +364,144 @@
   }
 
   /* ---------- المشاريع ---------- */
-  views.home = { title: 'مشاريع سرور', render: () => portfolio('all') };
+  views.home = { title: 'مشاريع سرور', render: () => home() };
   views.compounds = { title: 'المجمّعات السكنية', render: () => portfolio('compounds') };
+
+  /* ---------- الرئيسية: كل مشاريع الشركة، كل مشروع سطر واحد بنسبة إنجازه ---------- */
+  const DAY = 86400000;
+  const daysSince = (x) => (x ? Math.floor((Date.now() - new Date(x).getTime()) / DAY) : null);
+  const STALL_DAYS = 14;
+  const cntAr = (n, one, two, few, many) => (n === 1 ? one : n === 2 ? two : n >= 3 && n <= 10 ? `${num(n)} ${few}` : `${num(n)} ${many}`);
+
+  // ملخّص مشروع واحد: المجمّع من فحوصات وحداته، وغيره من مراحله
+  function projInfo(p) {
+    if (isCompound(p)) {
+      const d = state.data[p.id];
+      const D = F.dashboard(d, state.checkpoints);
+      const rows = d.units.map((u) => F.row(u, state.checkpoints, openNcrsOf(d, u.id)));
+      const today = new Date().toISOString().slice(0, 10);
+      const fails = rows.filter((k) => k.R).length;
+      const late = d.ncrs.filter((n) => n.status === 'open' && n.due_date && n.due_date < today).length;
+      const status = D.B3 && D.B4 === D.B3 ? 'done' : D.B6 === D.B3 ? 'not_started' : 'in_progress';
+      const why = [fails ? `${num(fails)} وحدة فيها فشل` : '', D.B8 ? `${num(D.B8)} تنبيه تسلسل` : '', D.B9 ? `${num(D.B9)} NCR مفتوحة` : '', late ? `${num(late)} متأخرة` : ''].filter(Boolean);
+      return { p, pct: D.B10, status, why, bad: !!(fails || D.B9), compound: true,
+        now: `${num(D.B3)} ${unitWords(p).one}، مكتملة ${num(D.B4)}، جارية ${num(D.B5)}`, curKey: null };
+    }
+    const sp = stageProgress(p);
+    const idle = sp.status === 'in_progress' ? daysSince(sp.last) : null;
+    const why = idle !== null && idle >= STALL_DAYS ? [`لم تتحرك منذ ${num(idle)} يوماً`] : [];
+    const now = sp.status === 'done' ? 'اكتملت كل المراحل' : sp.cur
+      ? `${sp.cur.s.status === 'in_progress' ? 'الآن' : 'التالية'}: ${sp.cur.c.name_ar} (${num(sp.cur.c.position)} من ${num(state.checkpoints.length)})` : '—';
+    return { p, pct: sp.pct, status: sp.status, why, bad: false, compound: false, now, curKey: sp.status === 'done' ? null : sp.cur?.c.key, sp };
+  }
+
+  async function home() {
+    await Promise.all(state.projects.filter(isCompound).map((p) => loadProject(p.id)));
+    const f = state._hf_home || (state._hf_home = { gov: '', brand: '', st: '' });
+    const rows = state.projects.map(projInfo);
+    const by = (st) => rows.filter((r) => r.status === st).length;
+    const attn = rows.filter((r) => r.why.length).sort((a, b) => (b.bad - a.bad) || (b.why.length - a.why.length));
+    const avg = rows.length ? rows.reduce((a, r) => a + r.pct, 0) / rows.length : 0;
+    const govs = new Set(rows.map((r) => r.p.governorate).filter(Boolean)).size;
+    const STL = { not_started: 'لم يبدأ', in_progress: 'جارٍ', done: 'مكتمل' };
+
+    const lead = !rows.length ? 'لا توجد مشاريع بعد. أنشئ أول مشروع لتبدأ المتابعة.'
+      : cntAr(rows.length, 'مشروع واحد', 'مشروعان', 'مشاريع', 'مشروعاً') + (govs ? ` في ${cntAr(govs, 'محافظة واحدة', 'محافظتين', 'محافظات', 'محافظة')}` : '')
+        + `: ${num(by('in_progress'))} جارٍ و${num(by('done'))} مكتمل. `
+        + (attn.length ? (attn.length === 1 ? 'مشروع واحد يحتاج انتباهك.' : `${num(attn.length)} مشاريع تحتاج انتباهك.`) : 'لا شيء يحتاج انتباهك الآن.');
+
+    // خريطة المحافظات: متوسط إنجاز مشاريع كل محافظة
+    const band = (v, has) => (!has ? 'none' : v >= 1 ? 'done' : v === 0 ? 'b0' : v < 0.25 ? 'b1' : v < 0.5 ? 'b2' : v < 0.75 ? 'b3' : 'b4');
+    const govMap = h('div', { class: 'gov-map', role: 'list', 'aria-label': 'المشاريع حسب المحافظة' }, GOVS.map(([g, c, r]) => {
+      const rs = rows.filter((x) => x.p.governorate === g);
+      const gp = rs.length ? rs.reduce((a, x) => a + x.pct, 0) / rs.length : 0;
+      const prob = rs.some((x) => x.bad) ? ' flag-fail' : rs.some((x) => x.why.length) ? ' flag-alert' : '';
+      const label = `${g}: ${rs.length ? `${rs.length} مشروع، إنجاز ${pctText(gp)}` : 'لا مشاريع'}`;
+      const el = h('button', { type: 'button', role: 'listitem', class: `gov tile ${band(gp, rs.length)}${prob}${f.gov === g ? ' sel' : ''}`, title: label, 'aria-label': label, 'aria-pressed': String(f.gov === g),
+        onClick: () => { f.gov = f.gov === g ? '' : g; render(); } }, h('span', { class: 'g-name' }, g), rs.length ? h('b', null, String(rs.length)) : null);
+      el.style.gridColumn = String(c); el.style.gridRow = String(r);
+      return el;
+    }));
+    const noGov = rows.filter((r) => !r.p.governorate).length;
+
+    // أين تقف المشاريع: عدد المشاريع الواقفة عند كل مرحلة
+    const stageRows = rows.filter((r) => !r.compound);
+    const pipe = h('ol', { class: 'pipe' }, state.checkpoints.map((c) => {
+      const here = stageRows.filter((r) => r.curKey === c.key);
+      return h('li', { class: here.length ? 'has' : '' }, h('span', { class: 'pp-n' }, num(c.position)), h('span', { class: 'pp-name' }, c.name_ar),
+        h('b', { class: 'pp-c' }, here.length ? num(here.length) : '·'),
+        here.length ? h('small', null, here.slice(0, 3).map((x) => x.p.client).join('، ') + (here.length > 3 ? '…' : '')) : null);
+    }));
+
+    // حسب الماركة
+    const brands = [...new Set(rows.map((r) => r.p.brand || 'غير محددة'))].sort();
+    const byBrand = brands.map((b) => {
+      const rs = rows.filter((r) => (r.p.brand || 'غير محددة') === b);
+      return { b, n: rs.length, pct: rs.reduce((a, x) => a + x.pct, 0) / rs.length };
+    });
+
+    // نشاط اليوم: مراحل تحرّكت اليوم
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const moved = [];
+    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.updated_at && new Date(x.updated_at) >= t0) moved.push({ p, x }); }));
+    moved.sort((a, b) => (a.x.updated_at < b.x.updated_at ? 1 : -1));
+    const cpName = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
+    const verb = { in_progress: 'بدأت', done: 'اكتملت', not_started: 'أُعيدت إلى "لم تبدأ"', na: 'لا تنطبق' };
+
+    const list = rows.filter((r) => (!f.gov || r.p.governorate === f.gov) && (!f.brand || (r.p.brand || 'غير محددة') === f.brand) && (!f.st || r.status === f.st))
+      .sort((a, b) => ({ in_progress: 0, not_started: 1, done: 2 }[a.status] - { in_progress: 0, not_started: 1, done: 2 }[b.status]) || (b.why.length - a.why.length));
+    const projRow = (r) => h('li', null, h('a', { href: '#/project/' + r.p.id, class: 'proj' },
+      h('span', { class: 'pj-main' }, h('b', null, r.p.client),
+        h('small', null, [r.compound ? PTYPES.compound : PTYPES[r.p.project_type], r.p.governorate, r.p.city, r.p.brand].filter(Boolean).join('، '))),
+      h('span', { class: 'pj-now' + (r.status === 'done' ? ' ok' : '') }, r.now),
+      h('span', { class: 'pj-prog' }, h('span', { class: 'st-bar' }, h('span', { style: { width: (r.pct * 100).toFixed(1) + '%' } })), h('b', null, pctText(r.pct))),
+      h('span', { class: 'pj-flags' }, r.why.length ? h('span', { class: 'chip ' + (r.bad ? 'st-has-failure' : 'alert') }, r.why[0]) : null)));
+
+    const stat = (l, v, c, st) => h('div', { class: 'st ' + c + (st && f.st === st ? ' sel' : '') },
+      st ? h('button', { type: 'button', class: 'st-btn', 'aria-pressed': String(f.st === st), onClick: () => { f.st = f.st === st ? '' : st; render(); } }, h('dd', null, num(v)), h('dt', null, l))
+        : [h('dd', null, num(v)), h('dt', null, l)]);
+
+    return h('div', { class: 'dash2 home' },
+      h('header', { class: 'd2-head' },
+        h('p', { class: 'd2-lead' }, lead),
+        h('div', { class: 'd2-pct' }, h('strong', null, pctText(avg)), h('span', null, 'متوسط إنجاز المشاريع'))),
+      h('dl', { class: 'd2-stats' },
+        stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
+        stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('تحتاج انتباهك', attn.length, attn.length ? 'bad' : 'muted')),
+      h('section', { class: 'd2-pipe' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'أين تقف المشاريع'),
+        h('span', { class: 'd2-note' }, 'عدد المشاريع عند كل مرحلة' + (rows.some((r) => r.compound) ? '. المجمّعات تُتابَع وحدةً وحدة في قسمها' : ''))), pipe),
+      h('div', { class: 'd2-grid' },
+        h('section', { class: 'd2-plan' },
+          h('div', { class: 'd2-plan-head' }, h('h2', null, 'المشاريع حسب المحافظة'),
+            h('span', { class: 'd2-note' }, f.gov ? `معروض: ${f.gov}. اضغطها مرة ثانية لإلغاء الاختيار` : 'اضغط محافظة لعرض مشاريعها' + (noGov ? `. ${num(noGov)} بلا محافظة محددة` : ''))),
+          govMap),
+        h('aside', { class: 'd2-side' },
+          h('section', { class: 'd2-attn' + (attn.length ? ' has' : '') }, h('h2', null, 'مشاريع تحتاج انتباهك'),
+            attn.length ? h('ul', null, attn.slice(0, 12).map((r) => h('li', null, h('a', { href: '#/project/' + r.p.id },
+              h('b', null, r.p.client), h('span', { class: 'why' + (r.bad ? '' : ' alert') }, r.why.join('، ')), h('span', { class: 'nx' }, r.p.governorate || '')))))
+              : h('p', { class: 'calm' }, 'لا مشاكل مفتوحة ولا مشاريع متوقفة.')),
+          h('section', { class: 'd2-brands' }, h('h2', null, 'حسب الماركة'),
+            byBrand.length ? h('ul', { class: 'brand-list' }, byBrand.map((x) => h('li', null,
+              h('button', { type: 'button', class: f.brand === x.b ? 'sel' : '', 'aria-pressed': String(f.brand === x.b), onClick: () => { f.brand = f.brand === x.b ? '' : x.b; render(); } },
+                h('b', { dir: 'auto' }, x.b), h('small', null, `${num(x.n)} مشروع`),
+                h('span', { class: 'st-bar' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })), h('span', { class: 'bp' }, pctText(x.pct))))))
+              : h('p', { class: 'calm' }, '—')))),
+      h('section', { class: 'd2-projects' },
+        h('div', { class: 'd2-plan-head' },
+          h('h2', null, (f.gov || f.brand || f.st) ? `المشاريع: ${[f.gov, f.brand, STL[f.st]].filter(Boolean).join('، ')} (${list.length})` : `كل المشاريع (${list.length})`),
+          h('div', { class: 'row' },
+            f.gov || f.brand || f.st ? h('button', { type: 'button', class: 'btn sm', onClick: () => { f.gov = ''; f.brand = ''; f.st = ''; render(); } }, 'إلغاء التصفية') : null,
+            isStaff() ? h('button', { type: 'button', class: 'btn sm primary', onClick: newProject }, '+ مشروع جديد') : null)),
+        list.length ? h('ul', { class: 'proj-list' }, list.map(projRow)) : h('p', { class: 'calm muted' }, rows.length ? 'لا مشاريع بهذه التصفية.' : (isStaff() ? 'أنشئ أول مشروع من زر "+ مشروع جديد".' : 'لم يُنشئ المدير أي مشروع بعد.'))),
+      h('section', { class: 'd2-today' }, h('h2', null, 'نشاط اليوم'),
+        moved.length ? h('ol', { class: 'today-list' }, moved.slice(0, 15).map(({ p, x }) => h('li', { class: x.status === 'done' ? 'act-done' : '' },
+          h('time', { dir: 'ltr' }, new Date(x.updated_at).toTimeString().slice(0, 5)),
+          h('a', { href: '#/project/' + p.id }, h('b', null, p.client)),
+          h('span', null, `${verb[x.status]} مرحلة ${cpName[x.checkpoint]}`),
+          h('small', null, x.crew ? `${num(x.crew)} كادر` : ''))))
+          : h('p', { class: 'calm muted' }, 'لم تتحرّك أي مرحلة اليوم بعد.'),
+        rows.some((r) => r.compound) ? h('div', null, h('h3', { class: 'd2-sub' }, 'فحوصات المجمّعات اليوم'), todayActivity(state.projects.filter(isCompound).map((p) => p.id))) : null));
+  }
 
   // لوحة مجموعة مشاريع: كل الشركة، أو المجمّعات السكنية فقط
   async function portfolio(scope) {
@@ -518,10 +698,13 @@
     const pf = projectFields();
     const count = h('input', { type: 'number', min: 0, max: 2000, dir: 'ltr', value: 0 });
     const prefix = h('input', { dir: 'ltr', value: 'V-', maxlength: 10 });
-    modal('مشروع جديد', h('div', { class: 'stack sm' }, pf.grid,
-      h('div', { class: 'form-grid' },
-        field('عدد الوحدات', count, { hint: 'ضع 0 إذا ستستورد ملف Excel للمشروع' }),
-        field('بادئة الترقيم', prefix, { hint: 'مثال: V- تعطي V-001، V-002…' }))),
+    // الوحدات تخصّ المجمّعات فقط؛ باقي المشاريع تُتابَع بمراحلها
+    const unitsBox = h('div', { class: 'form-grid' },
+      field('عدد الوحدات', count, { hint: 'ضع 0 إذا ستستورد ملف Excel للمجمّع' }),
+      field('بادئة الترقيم', prefix, { hint: 'مثال: V- تعطي V-001، V-002…' }));
+    const syncUnits = () => { unitsBox.hidden = pf.el.type.value !== 'compound'; if (unitsBox.hidden) count.value = 0; };
+    pf.el.type.addEventListener('change', syncUnits); syncUnits();
+    modal('مشروع جديد', h('div', { class: 'stack sm' }, pf.grid, unitsBox),
     [{ label: 'إنشاء المشروع', cls: 'primary', run: async () => {
       const v = pf.values();
       const n = Number(count.value);
@@ -537,7 +720,7 @@
       }
       state.projects.push(res.data);
       toast('تم إنشاء المشروع');
-      go('project/' + res.data.id + '/tracker');
+      go('project/' + res.data.id + (isCompound(res.data) ? '/tracker' : ''));
     } }]);
   }
 
@@ -619,9 +802,9 @@
         btn.disabled = true;
         try {
           const all = (t) => fetchAll((a, b) => state.sb.from(t).select('*').range(a, b));
-          const [units, checks, tests, ncrs] = await Promise.all([all('units'), all('unit_checks'), all('test_records'), all('ncrs')]);
+          const [units, checks, tests, ncrs, stages] = await Promise.all([all('units'), all('unit_checks'), all('test_records'), all('ncrs'), all('project_stages')]);
           download(new Blob([JSON.stringify({ app: 'surour-vrf-qc', version: 4, exported_at: new Date().toISOString(),
-            projects: state.projects, units, unit_checks: checks, test_records: tests, ncrs }, null, 1)], { type: 'application/json' }),
+            projects: state.projects, project_stages: stages, units, unit_checks: checks, test_records: tests, ncrs }, null, 1)], { type: 'application/json' }),
           `surour-backup-${new Date().toISOString().slice(0, 10)}.json`);
           toast('تم التنزيل');
         } catch (e) { fail(e); }
@@ -634,7 +817,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, isAdmin, isStaff, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));

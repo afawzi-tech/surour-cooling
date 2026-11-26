@@ -42,6 +42,7 @@
       const p = projectOf(r.id);
       W = A.unitWords(p || {});
       if (!p) return A.empty('المشروع غير موجود', '', h('a', { href: '#/home', class: 'btn' }, 'المشاريع'));
+      if (!A.isCompound(p)) return stagesProject(p, r);
       const d = await A.loadProject(p.id);
       if (r.tab === 'villa') {
         const u = d.units.find((x) => x.id === r.sub);
@@ -59,6 +60,154 @@
         bottomNav(p, tab));
     }
   };
+
+  /* ==========================================================
+     مراحل العمل: المشروع كله يمرّ بالمراحل الـ13 بالترتيب
+     ابدأ ← أكملت ← تبدأ التالية وحدها. التواريخ تُملأ على الخادم.
+     ========================================================== */
+  const ST_CLS = { not_started: 'ns', in_progress: 'ip', done: 'dn', na: 'na' };
+  const daysAgo = (d) => Math.max(0, Math.round((new Date(today()) - new Date(d)) / 86400000));
+  const sinceText = (d) => { const n = daysAgo(d); return n === 0 ? 'اليوم' : n === 1 ? 'منذ يوم' : n === 2 ? 'منذ يومين' : n <= 10 ? `منذ ${num(n)} أيام` : `منذ ${num(n)} يوماً`; };
+
+  async function saveStage(p, key, patch) {
+    const row = { project_id: p.id, checkpoint: key, ...patch };
+    const r = await S.sb.from('project_stages').upsert(row, { onConflict: 'project_id,checkpoint' }).select().single();
+    if (r.error) { A.fail(r.error); return null; }
+    (S.stages[p.id] ||= {})[key] = r.data;
+    return r.data;
+  }
+
+  function stagesProject(p, r) {
+    const tab = r.tab === 'settings' ? 'settings' : 'stages';
+    const meta = [A.PTYPES[p.project_type], p.governorate, p.city, p.brand].filter(Boolean).join('، ');
+    return h('div', { class: 'book stages-book' },
+      h('div', { class: 'book-head' },
+        h('div', null, h('a', { href: '#/home', class: 'link small back' }, '→ كل المشاريع'), h('h1', null, p.client),
+          meta ? h('p', { class: 'muted small' }, meta) : null)),
+      h('nav', { class: 'sheet-tabs', 'aria-label': 'أقسام المشروع' },
+        [['stages', 'مراحل العمل'], ['settings', 'بيانات المشروع']].map(([k, l]) =>
+          h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null }, l))),
+      h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : stagesSheet(p)));
+  }
+
+  function stagesSheet(p) {
+    const sp = A.stageProgress(p);
+    const staff = A.isStaff();
+    const total = S.checkpoints.length;
+    const cur = sp.status === 'done' ? null : sp.cur;
+    const nextAfter = (key) => sp.list.find((x) => x.c.position > S.checkpoints.find((c) => c.key === key).position && x.s.status === 'not_started');
+
+    // إكمال المرحلة الحالية وبدء التالية
+    const complete = async (btn) => {
+      btn.disabled = true;
+      const nx = nextAfter(cur.c.key);
+      const ok = await saveStage(p, cur.c.key, { status: 'done', crew: cur.s.crew ?? null });
+      if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: cur.s.crew ?? null });
+      if (ok) toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل');
+      A.render();
+    };
+    const start = async (btn, crew) => {
+      btn.disabled = true;
+      const n = crew.value === '' ? null : Number(crew.value);
+      if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { btn.disabled = false; return toast('عدد الكوادر من 0 إلى 500', 'error'); }
+      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n })) toast(`بدأت مرحلة "${cur.c.name_ar}"`);
+      A.render();
+    };
+
+    let panel;
+    if (sp.status === 'done') {
+      panel = h('section', { class: 'now-card done' }, h('span', { class: 'nc-tag' }, 'اكتمل المشروع'),
+        h('h2', null, 'كل المراحل مكتملة'), h('p', null, `انتهت آخر مرحلة ${sp.list.map((x) => x.s.end_date).filter(Boolean).sort().pop() || ''}.`));
+    } else if (cur) {
+      const ip = cur.s.status === 'in_progress';
+      const crew = h('input', { type: 'number', min: 0, max: 500, inputmode: 'numeric', dir: 'ltr', placeholder: '0', value: cur.s.crew ?? '' , class: 'crew-in' });
+      panel = h('section', { class: 'now-card ' + (ip ? 'ip' : 'ns') },
+        h('span', { class: 'nc-tag' }, ip ? `المرحلة الحالية · ${num(cur.c.position)} من ${num(total)}` : `المرحلة التالية · ${num(cur.c.position)} من ${num(total)}`),
+        h('h2', null, cur.c.name_ar),
+        ip ? h('p', null, (cur.s.start_date ? `بدأت ${sinceText(cur.s.start_date)} (${cur.s.start_date})` : 'جارية') + (cur.s.crew ? ` · ${num(cur.s.crew)} كادر` : ''))
+          : h('p', null, sp.done ? 'المرحلة السابقة اكتملت. ابدأ هذه عندما يبدأ العمل فعلاً.' : 'لم يبدأ العمل في المشروع بعد.'),
+        staff ? (ip
+          ? h('div', { class: 'nc-actions' },
+              h('button', { type: 'button', class: 'btn primary big', onClick: (e) => complete(e.currentTarget) }, '✓ اكتملت هذه المرحلة'),
+              h('button', { type: 'button', class: 'btn ghost', onClick: () => stageDialog(p, cur.c) }, 'تعديل التفاصيل'))
+          : h('div', { class: 'nc-actions' },
+              h('label', { class: 'crew-label' }, 'عدد الكوادر', crew),
+              h('button', { type: 'button', class: 'btn primary big', onClick: (e) => start(e.currentTarget, crew) }, '▶ ابدأ المرحلة'),
+              h('button', { type: 'button', class: 'btn ghost', onClick: async () => { await saveStage(p, cur.c.key, { status: 'na' }); A.render(); } }, 'لا تنطبق على هذا المشروع')))
+          : h('p', { class: 'muted small' }, 'تحديث المراحل للمدير والمشرف.'),
+        ip && nextAfter(cur.c.key) ? h('p', { class: 'nc-next' }, `بعدها: ${nextAfter(cur.c.key).c.name_ar}`) : null);
+    }
+
+    const steps = h('ol', { class: 'steps' }, sp.list.map(({ c, s }) => {
+      const isCur = cur && cur.c.key === c.key;
+      const dates = s.status === 'done' ? `${s.start_date || '…'} ← ${s.end_date}` : s.status === 'in_progress' ? `منذ ${s.start_date}` : '';
+      const inner = [
+        h('span', { class: 'sp-dot' }, s.status === 'done' ? '✓' : s.status === 'na' ? '—' : num(c.position)),
+        h('span', { class: 'sp-body' }, h('b', null, c.name_ar),
+          h('small', null, [dates, s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter(Boolean).join(' · ') || ' ')),
+        h('span', { class: 'chip sp-st ' + ST_CLS[s.status] }, A.STAGE_AR[s.status])
+      ];
+      return h('li', { class: `step ${ST_CLS[s.status]}${isCur ? ' cur' : ''}` },
+        staff ? h('button', { type: 'button', class: 'sp-row', onClick: () => stageDialog(p, c), 'aria-label': `${c.name_ar}: ${A.STAGE_AR[s.status]}. تعديل` }, inner) : h('div', { class: 'sp-row' }, inner));
+    }));
+
+    return h('div', { class: 'stages' },
+      h('section', { class: 'prog-head' },
+        h('div', { class: 'ph-pct' }, h('strong', null, A.pctText(sp.pct)), h('span', null, 'إنجاز المشروع')),
+        h('div', { class: 'ph-bar' }, h('div', { class: 'seg-bar', 'aria-hidden': 'true' }, sp.list.map(({ s }) => h('i', { class: ST_CLS[s.status] }))),
+          h('p', null, `${num(sp.done)} من ${num(sp.total)} مراحل مكتملة` + (sp.total < total ? ` (${num(total - sp.total)} لا تنطبق)` : '')))),
+      panel || null,
+      h('section', { class: 'steps-wrap' }, h('h2', null, 'كل المراحل'), staff ? h('p', { class: 'muted small' }, 'اضغط أي مرحلة لتعديل حالتها أو تواريخها أو عدد الكوادر أو الملاحظات.') : null, steps));
+  }
+
+  // نافذة تعديل مرحلة
+  function stageDialog(p, c) {
+    const s = A.stageOf(p, c.key);
+    let status = s.status;
+    const seg = h('div', { class: 'seg4 st4', role: 'radiogroup', 'aria-label': 'الحالة' }, ['not_started', 'in_progress', 'done', 'na'].map((k) =>
+      h('button', { type: 'button', role: 'radio', class: 'st-' + ST_CLS[k] + (k === status ? ' on' : ''), 'aria-checked': String(k === status), onClick: (e) => {
+        status = k;
+        seg.querySelectorAll('button').forEach((b) => { b.classList.remove('on'); b.setAttribute('aria-checked', 'false'); });
+        e.currentTarget.classList.add('on'); e.currentTarget.setAttribute('aria-checked', 'true');
+      } }, A.STAGE_AR[k])));
+    const sd = h('input', { type: 'date', value: s.start_date || '', dir: 'ltr' });
+    const ed = h('input', { type: 'date', value: s.end_date || '', dir: 'ltr' });
+    const crew = h('input', { type: 'number', min: 0, max: 500, inputmode: 'numeric', dir: 'ltr', value: s.crew ?? '' });
+    const notes = h('textarea', { rows: 3, maxlength: 2000 }, s.notes || '');
+    A.modal(`${num(c.position)}. ${c.name_ar}`, h('div', { class: 'stack sm' }, seg,
+      h('div', { class: 'form-grid' }, A.field('تاريخ البدء', sd, { hint: 'يُملأ تلقائياً عند "جارية"' }), A.field('تاريخ الانتهاء', ed, { hint: 'يُملأ تلقائياً عند "مكتملة"' }),
+        A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }))),
+    [{ label: 'حفظ', cls: 'primary', run: async () => {
+      const n = crew.value === '' ? null : Number(crew.value);
+      if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { toast('عدد الكوادر من 0 إلى 500', 'error'); return false; }
+      if (sd.value && ed.value && ed.value < sd.value) { toast('تاريخ الانتهاء قبل تاريخ البدء', 'error'); return false; }
+      const ok = await saveStage(p, c.key, { status, start_date: sd.value || null, end_date: ed.value || null, crew: n, notes: notes.value.trim() || null });
+      if (!ok) return false;
+      toast('تم الحفظ'); A.render();
+    } }]);
+  }
+
+  // بيانات المشروع وحذفه
+  function settingsPanel(p) {
+    if (!A.isStaff()) return h('p', { class: 'muted' }, 'تعديل بيانات المشروع للمدير والمشرف.');
+    const pf = A.projectFields(p);
+    const del = async () => {
+      if (!await confirmBox({ title: 'حذف المشروع', body: `سيُحذف "${p.client}" مع كل مراحله وبياناته نهائياً.`, okText: 'حذف نهائي', danger: true })) return;
+      const r = await S.sb.from('projects').delete().eq('id', p.id);
+      if (r.error) return A.fail(r.error);
+      S.projects = S.projects.filter((x) => x.id !== p.id); delete S.data[p.id]; delete S.stages[p.id];
+      S._stayHome = true; A.go('home');
+    };
+    return h('section', { class: 'panel stack sm' }, h('h3', null, 'بيانات المشروع'), pf.grid,
+      h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary sm', onClick: async () => {
+        const v = pf.values();
+        if (!v.client) return toast('اسم المشروع مطلوب', 'error');
+        const r = await S.sb.from('projects').update(v).eq('id', p.id).select().maybeSingle();
+        if (r.error || !r.data) return A.fail(r.error || 'permission denied');
+        Object.assign(p, r.data); toast('تم حفظ بيانات المشروع'); A.render();
+      } }, 'حفظ بيانات المشروع')),
+      A.isAdmin() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn danger sm', onClick: del }, 'حذف المشروع')) : null);
+  }
 
   // أزرار المشروع: صف على الكمبيوتر، وقائمة "المزيد" على الجوال
   function projectActions(p, d) {
