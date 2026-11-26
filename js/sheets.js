@@ -43,23 +43,45 @@
       const d = await A.loadProject(p.id);
       if (r.tab === 'villa') {
         const u = d.units.find((x) => x.id === r.sub);
-        return u ? villaPage(p, d, u) : A.empty('الفيلا غير موجودة', '', h('a', { href: `#/project/${p.id}/tracker`, class: 'btn' }, 'متابعة الفلل'));
+        return u ? h('div', null, villaPage(p, d, u), bottomNav(p, 'tracker')) : A.empty('الفيلا غير موجودة', '', h('a', { href: `#/project/${p.id}/tracker`, class: 'btn' }, 'متابعة الفلل'));
       }
       const tab = SHEETS.some((s) => s[0] === r.tab) ? r.tab : 'dashboard';
       const body = { dashboard: sheetDashboard, tracker: sheetTracker, tests: sheetTests, ncr: sheetNcr, guide: sheetGuide }[tab](p, d);
       return h('div', { class: 'book' },
-        h('div', { class: 'book-head' },
-          h('h1', null, p.client),
-          h('div', { class: 'row' },
-            A.isStaff() ? h('button', { type: 'button', class: 'btn sm', onClick: () => addVillas(p, d) }, '+ فلل') : null,
-            h('button', { type: 'button', class: 'btn sm', title: 'تحديث البيانات من الخادم', onClick: async () => { await A.loadProject(p.id, true); A.render(); } }, '↻ تحديث'),
-            A.isStaff() ? h('button', { type: 'button', class: 'btn sm', onClick: () => importDialog(p) }, 'استيراد Excel') : null,
-            h('button', { type: 'button', class: 'btn sm', onClick: () => exportExcel(p, d) }, 'تصدير Excel'))),
+        h('div', { class: 'book-head' }, h('h1', null, p.client), projectActions(p, d)),
         h('nav', { class: 'sheet-tabs', 'aria-label': 'أوراق المشروع' }, SHEETS.map(([k, ar, en]) =>
           h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), title: en, 'aria-current': k === tab ? 'page' : null }, ar))),
-        h('div', { class: 'sheet' }, body));
+        h('div', { class: 'sheet' }, body),
+        bottomNav(p, tab));
     }
   };
+
+  // أزرار المشروع: صف على الكمبيوتر، وقائمة "المزيد" على الجوال
+  function projectActions(p, d) {
+    const items = [
+      ['تقرير اليوم', () => dailyReport(p, d), A.isStaff()],
+      ['+ فلل', () => addVillas(p, d), A.isStaff()],
+      ['↻ تحديث', async () => { await A.loadProject(p.id, true); A.render(); }, true],
+      ['استيراد Excel', () => importDialog(p), A.isStaff()],
+      ['تصدير Excel', () => exportExcel(p, d), true]
+    ].filter((x) => x[2]);
+    if (!mobile()) return h('div', { class: 'row' }, items.map(([l, fn]) => h('button', { type: 'button', class: 'btn sm', onClick: fn }, l)));
+    const menu = h('details', { class: 'more' }, h('summary', { 'aria-label': 'المزيد' }, '⋯'),
+      h('div', { class: 'more-list' }, items.map(([l, fn]) => h('button', { type: 'button', onClick: () => { menu.open = false; fn(); } }, l))));
+    return menu;
+  }
+
+  // شريط سفلي ثابت على الجوال
+  function bottomNav(p, active) {
+    const icons = { dashboard: '◧', tracker: '▦', tests: '⏱', ncr: '⚠', guide: '?' };
+    const short = { dashboard: 'اللوحة', tracker: 'الفلل', tests: 'الفحوصات', ncr: 'NCR', guide: 'المساعدة' };
+    const d = S.data[p.id];
+    const open = d ? d.ncrs.filter((n) => n.status === 'open').length : 0;
+    return h('nav', { class: 'bottom-nav', 'aria-label': 'التنقل' }, SHEETS.map(([k, ar]) =>
+      h('a', { href: `#/project/${p.id}/${k}`, class: k === active ? 'on' : '', 'aria-label': ar, 'aria-current': k === active ? 'page' : null },
+        h('span', { class: 'bn-ico', 'aria-hidden': 'true' }, icons[k], k === 'ncr' && open ? h('i', { class: 'bn-badge' }, String(open)) : null),
+        h('span', null, short[k]))));
+  }
 
   /* ==========================================================
      لوحة التحكم
@@ -83,7 +105,7 @@
 
     return h('div', { class: 'stack' },
       h('div', { class: 'kpis' },
-        kpi('الإنجاز الكلي', A.pctText(D.B10), 'main', pbar(D.B10)),
+        kpi('الإنجاز الكلي', A.pctText(D.B10), 'kpi-main', pbar(D.B10)),
         kpi('عدد الفلل', num(D.B3)),
         kpi('مكتملة', num(D.B4), 'good'),
         kpi('جارية', num(D.B5)),
@@ -114,7 +136,9 @@
      ========================================================== */
   function sheetTracker(p, d) {
     const cps = S.checkpoints;
-    const f = S._tf || (S._tf = { q: '', zone: '', crew: '', status: '', next: '' });
+    const f = S._tf || (S._tf = { q: '', zone: '', crew: '', status: '', next: '', sort: mobile() ? 'priority' : 'code' });
+    // الأولوية: مشكلة ← جارية ← لم تبدأ ← مكتملة
+    const rank = (k) => (k.R || k.W || k.T ? 0 : k.U === 'In progress' ? 1 : k.U === 'Not started' ? 2 : 3);
     const zones = [...new Set(d.units.map((u) => u.zone).filter(Boolean))].sort();
     const crews = [...new Set(d.units.map((u) => u.crew).filter(Boolean))].sort();
     const box = h('div');
@@ -127,7 +151,8 @@
       && (!f.next || (f.next === '-' ? k.V === '-' : k.V !== '-' && k.V.key === f.next));
 
     const draw = () => {
-      const list = d.units.map((u) => ({ u, k: F.row(u, cps, A.openNcrsOf(d, u.id)) })).filter(({ u, k }) => visible(u, k));
+      let list = d.units.map((u) => ({ u, k: F.row(u, cps, A.openNcrsOf(d, u.id)) })).filter(({ u, k }) => visible(u, k));
+      if (f.sort === 'priority') list = list.map((x, i) => ({ ...x, i })).sort((a, b) => rank(a.k) - rank(b.k) || b.k.S - a.k.S || a.i - b.i);
       count.textContent = `${num(list.length)} من ${num(d.units.length)} فيلا`;
       clear(box).appendChild(!list.length ? A.empty('لا توجد فلل مطابقة')
         : isMobile ? villaCards(p, list) : trackerTable(p, d, list));
@@ -141,7 +166,10 @@
       sel('status', 'كل الحالات', [['Has failure', 'فيها فشل'], ['alert', 'تنبيه تسلسل'], ['In progress', 'جارية'], ['Not started', 'لم تبدأ'], ['Complete', 'مكتملة']]),
       sel('next', 'كل الخطوات التالية', cps.map((c) => [c.key, c.name_ar]).concat([['-', 'لا شيء (مكتملة)']]))
     ];
-    const active = Object.values(f).filter(Boolean).length;
+    filters.push(h('select', { 'aria-label': 'الترتيب', onChange: (e) => { f.sort = e.target.value; draw(); } },
+      h('option', { value: 'priority', selected: f.sort === 'priority' }, 'الترتيب: الأولوية'),
+      h('option', { value: 'code', selected: f.sort === 'code' }, 'الترتيب: رقم الفيلا')));
+    const active = ['q', 'zone', 'crew', 'status', 'next'].filter((k) => f[k]).length;
 
     draw();
     return h('div', { class: 'stack' },
@@ -189,10 +217,22 @@
   }
 
   function villaCards(p, list) {
-    return h('ul', { class: 'vcards' }, list.map(({ u, k }) => h('li', null, h('a', { href: villaHref(p, u), class: 'vcard' + (k.W || k.R ? ' warn' : '') },
-      h('div', { class: 'vc-top' }, h('b', null, u.code), statusChip(k.U), k.W ? h('span', { class: 'chip alert' }, 'تنبيه') : null),
-      h('div', { class: 'vc-bar' }, pbar(k.S), h('span', null, A.pctText(k.S))),
-      h('div', { class: 'muted small' }, 'التالي: ' + (k.V === '-' ? '—' : k.V.name_ar), u.zone ? ' · ' + u.zone : '', u.crew ? ' · ' + u.crew : '')))));
+    let lastGroup = null;
+    const groupName = (k) => (k.R || k.W || k.T ? 'تحتاج انتباهاً' : k.U === 'In progress' ? 'جارية' : k.U === 'Not started' ? 'لم تبدأ' : 'مكتملة');
+    const sorted = (S._tf || {}).sort === 'priority';
+    const out = [];
+    list.forEach(({ u, k }) => {
+      const g = groupName(k);
+      if (sorted && g !== lastGroup) { out.push(h('li', { class: 'vgroup' }, g)); lastGroup = g; }
+      out.push(h('li', null, h('a', { href: villaHref(p, u), class: 'vcard' + (k.W || k.R ? ' warn' : '') },
+        h('b', { class: 'vc-code' }, u.code),
+        h('span', { class: 'vc-mid' },
+          h('span', { class: 'vc-next' }, k.V === '-' ? 'مكتملة' : k.V.name_ar),
+          h('span', { class: 'vc-tags' }, k.W ? h('span', { class: 'chip alert' }, 'تنبيه') : null, k.R ? h('span', { class: 'chip st-has-failure' }, `${k.R} فاشل`) : null,
+            k.T ? h('span', { class: 'chip' }, `${k.T} NCR`) : null)),
+        h('span', { class: 'vc-pct' }, A.pctText(k.S), pbar(k.S)))));
+    });
+    return h('ul', { class: 'vcards' }, out);
   }
 
   // اختيار نتيجة بأزرار كبيرة
@@ -265,18 +305,34 @@
         h('p', null, 'الخطوة التالية: ', h('b', null, k.V === '-' ? '—' : k.V.name_ar)),
         alerts.length ? h('div', { class: 'alert-box' }, h('b', null, 'تنبيه تسلسل: '), alerts.join('. ')) : null),
       info,
+      staff && k.V !== '-' ? h('section', { class: 'panel quick' },
+        h('span', { class: 'muted small' }, 'الخطوة التالية'),
+        h('b', { class: 'quick-name' }, k.V.name_ar, ' ', h('small', { class: 'muted', dir: 'ltr' }, k.V.itp_ref)),
+        h('div', { class: 'quick-btns' },
+          h('button', { type: 'button', class: 'btn big pass', onClick: async () => { if (await saveResult(u, k.V, 'pass')) { toast(`${u.code} · ${k.V.name_ar}: ناجح`); A.render(); } } }, '✓ ناجح'),
+          h('button', { type: 'button', class: 'btn big fail', onClick: async () => { if (await saveResult(u, k.V, 'fail')) { toast(`${u.code} · ${k.V.name_ar}: فاشل. أضف NCR`, 'error'); A.render(); } } }, '✗ فاشل'))) : null,
       h('section', { class: 'panel' }, h('h2', null, 'نقاط الفحص'),
-        h('ol', { class: 'cp-list' }, cps.map((cp) => {
-          const v = r(cp.key);
-          return h('li', { class: 'cp-row v-' + v },
-            h('div', { class: 'cp-name' }, h('span', { class: 'cp-n' }, String(cp.position)), h('div', null, h('b', null, cp.name_ar), h('small', { class: 'muted', dir: 'ltr' }, cp.itp_ref))),
-            staff
-              ? h('div', { class: 'seg4', role: 'group', 'aria-label': cp.name_ar }, RES_KEYS.map((x) => h('button', {
-                  type: 'button', class: 'r-' + x + (x === v ? ' on' : ''), 'aria-pressed': String(x === v),
-                  onClick: async () => { if (x !== v && await saveResult(u, cp, x)) A.render(); }
-                }, A.RES_AR[x])))
-              : h('span', { class: 'chip r-' + v }, A.RES_AR[v]));
-        }))),
+        (() => {
+          const row = (cp) => {
+            const v = r(cp.key);
+            return h('li', { class: 'cp-row v-' + v },
+              h('div', { class: 'cp-name' }, h('span', { class: 'cp-n' }, String(cp.position)), h('div', null, h('b', null, cp.name_ar), h('small', { class: 'muted', dir: 'ltr' }, cp.itp_ref))),
+              staff
+                ? h('div', { class: 'seg4', role: 'group', 'aria-label': cp.name_ar }, RES_KEYS.map((x) => h('button', {
+                    type: 'button', class: 'r-' + x + (x === v ? ' on' : ''), 'aria-pressed': String(x === v),
+                    onClick: async () => { if (x !== v && await saveResult(u, cp, x)) A.render(); }
+                  }, A.RES_AR[x])))
+                : h('span', { class: 'chip r-' + v }, A.RES_AR[v]));
+          };
+          const done = cps.filter((cp) => ['pass', 'na'].includes(r(cp.key)) && !(alerts.length && ['insulation', 'charging', 'commissioning'].includes(cp.key)));
+          const rest = cps.filter((cp) => !done.includes(cp));
+          return [
+            done.length ? h('details', { class: 'done-group' },
+              h('summary', null, `✓ ${done.length} مرحلة ناجحة أو لا تنطبق`, h('span', { class: 'muted small' }, ' (عرض وتعديل)')),
+              h('ol', { class: 'cp-list' }, done.map(row))) : null,
+            h('ol', { class: 'cp-list' }, rest.map(row))
+          ];
+        })()),
       h('section', { class: 'panel' },
         h('div', { class: 'row between' }, h('h2', null, 'القراءات'), h('button', { type: 'button', class: 'btn sm primary', onClick: () => testForm(p, d, u) }, blank(t.unit_id) ? 'تسجيل قراءات' : 'تعديل القراءات')),
         blank(t.unit_id) ? h('p', { class: 'muted' }, 'لا توجد قراءات بعد.') : h('div', { class: 'rds' },
@@ -290,6 +346,49 @@
           h('b', null, n.ncr_no), ' ', S.checkpoints.find((x) => x.key === n.checkpoint)?.name_ar, ': ', n.description,
           staff ? h('button', { type: 'button', class: 'btn ghost sm', onClick: () => ncrForm(p, d, n) }, 'تعديل') : null)))
           : h('p', { class: 'muted' }, 'لا توجد.')));
+  }
+
+  /* ---------- تقرير اليوم ---------- */
+  async function dailyReport(p, d) {
+    const day = today();
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const res = await A.fetchAll((a, b) => S.sb.from('unit_checks').select('unit_id, checkpoint, result, inspected_at, units!inner(project_id)')
+      .eq('units.project_id', p.id).gte('inspected_at', start.toISOString()).order('inspected_at').range(a, b)).catch((e) => { A.fail(e); return null; });
+    if (!res) return;
+    const code = Object.fromEntries(d.units.map((u) => [u.id, u.code]));
+    const cpName = Object.fromEntries(S.checkpoints.map((c) => [c.key, c.name_ar]));
+    const D = F.dashboard(d, S.checkpoints);
+    const cnt = { pass: 0, fail: 0, na: 0, pending: 0 };
+    res.forEach((x) => { cnt[x.result]++; });
+    const byVilla = new Map();
+    res.forEach((x) => { const k = code[x.unit_id]; if (!byVilla.has(k)) byVilla.set(k, []); byVilla.get(k).push(`${cpName[x.checkpoint]} ${({ pass: '✓', fail: '✗', na: '—', pending: '↺' })[x.result]}`); });
+    const fails = res.filter((x) => x.result === 'fail').map((x) => `${code[x.unit_id]}: ${cpName[x.checkpoint]}`);
+    const openN = d.ncrs.filter((n) => n.status === 'open');
+    const late = openN.filter((n) => n.due_date && n.due_date < day);
+    const newN = d.ncrs.filter((n) => n.date_raised === day);
+    const alerts = d.units.filter((u) => F.row(u, S.checkpoints, 0).W).map((u) => u.code);
+    const lines = [
+      `تقرير فحص الجودة - ${p.client}`,
+      `التاريخ: ${day}`,
+      '',
+      `فحوصات اليوم: ${res.length} (ناجح ${cnt.pass}، فاشل ${cnt.fail}، لا ينطبق ${cnt.na}${cnt.pending ? `، أُعيد لمعلّق ${cnt.pending}` : ''})`,
+      ...[...byVilla.entries()].map(([v, items]) => `• ${v}: ${items.join('، ')}`),
+      '',
+      fails.length ? `الفشل اليوم:\n${fails.map((x) => '• ' + x).join('\n')}` : 'لا فشل اليوم.',
+      `NCR جديدة اليوم: ${newN.length} · مفتوحة: ${openN.length}${late.length ? ` (متأخرة ${late.length}: ${late.map((n) => n.ncr_no).join('، ')})` : ''}`,
+      alerts.length ? `تنبيهات التسلسل: ${alerts.join('، ')}` : 'لا تنبيهات تسلسل.',
+      '',
+      `الإنجاز الكلي: ${A.pctText(D.B10)} · مكتملة ${D.B4} من ${D.B3} · جارية ${D.B5}`
+    ];
+    const text = lines.join('\n');
+    const area = h('textarea', { rows: 14, readonly: true, value: text, class: 'report-text' });
+    const actions = [
+      { label: 'نسخ', run: async () => { try { await navigator.clipboard.writeText(text); toast('تم النسخ'); } catch (e) { area.select(); document.execCommand('copy'); toast('تم النسخ'); } return false; } }
+    ];
+    if (navigator.share) actions.push({ label: 'مشاركة', run: async () => { try { await navigator.share({ text }); } catch (e) { /* أُلغيت */ } return false; } });
+    A.modal('تقرير اليوم', h('div', { class: 'stack sm' }, area,
+      h('a', { class: 'btn wa', href: 'https://wa.me/?text=' + encodeURIComponent(text), target: '_blank', rel: 'noopener noreferrer' }, 'إرسال عبر واتساب'),
+      h('p', { class: 'muted small' }, 'التقرير يشمل آخر تغيير على كل خانة اليوم.')), actions);
   }
 
   function addVillas(p, d) {
@@ -363,11 +462,17 @@
     const f = S._tt || (S._tt = { q: '' });
     const tbody = h('tbody');
     const withData = () => d.units.filter((u) => d.tests.has(u.id));
+    const cards = mobile() ? h('ul', { class: 'tcards' }) : null;
     const draw = () => {
       clear(tbody);
       const list = (f.q ? d.units.filter((u) => u.code.toLowerCase().includes(f.q.toLowerCase())) : withData());
+      if (cards) { clear(cards); list.forEach((u) => cards.appendChild(testCard(p, d, u))); }
       list.forEach((u) => tbody.appendChild(testRow(p, d, u)));
-      if (!list.length) tbody.appendChild(h('tr', null, h('td', { colspan: 15, class: 'muted center' }, f.q ? 'لا توجد فيلا بهذا الرقم' : 'لا توجد قراءات بعد. ابحث عن فيلا لتسجيل قراءاتها.')));
+      if (!list.length) {
+        const msg = f.q ? 'لا توجد فيلا بهذا الرقم' : 'لا توجد قراءات بعد. ابحث عن فيلا لتسجيل قراءاتها.';
+        tbody.appendChild(h('tr', null, h('td', { colspan: 15, class: 'muted center' }, msg)));
+        if (cards) cards.appendChild(h('li', { class: 'muted center' }, msg));
+      }
     };
     const lim = (key, label, step) => A.field(label, h('input', { type: 'number', step, min: 0, dir: 'ltr', value: p[key], disabled: !staff, onChange: async (e) => {
       const v = Number(e.target.value);
@@ -388,7 +493,7 @@
       h('div', { class: 'filters' },
         h('input', { type: 'search', placeholder: 'ابحث عن فيلا لتسجيل قراءاتها', value: f.q, 'aria-label': 'بحث', onInput: (e) => { f.q = e.target.value; draw(); } }),
         h('span', { class: 'muted small' }, `${withData().length} فيلا لها قراءات`)),
-      h('div', { class: 'xl-wrap' }, h('table', { class: 'xl tests' },
+      cards || h('div', { class: 'xl-wrap' }, h('table', { class: 'xl tests' },
         h('thead', null,
           h('tr', { class: 'grp' }, h('th', { class: 'stk' }), h('th', { colspan: 5 }, 'فحص الضغط'), h('th', { colspan: 4 }, 'الفاكيوم'), h('th', { colspan: 4 }, 'شحن الفريون'), h('th')),
           h('tr', null, h('th', { class: 'stk' }, 'الفيلا'),
@@ -397,6 +502,17 @@
             h('th', null, 'محسوب'), h('th', null, 'فعلي'), h('th', { class: 'f' }, 'الفرق'), h('th', { class: 'f' }, 'النتيجة'),
             h('th', null, 'الفاحص'))),
         tbody)));
+  }
+
+  function testCard(p, d, u) {
+    const t = d.tests.get(u.id) || {};
+    const c = F.test(t, p);
+    const item = (label, val, chk) => h('div', { class: 'tc-item ' + (chk === 'CHECK' ? 'bad' : chk === 'OK' ? 'good' : '') },
+      h('span', { class: 'muted small' }, label), h('b', null, blank(val) ? '—' : String(val)), chk ? h('span', { class: 'small' }, CHECK_AR[chk]) : null);
+    return h('li', null, h('button', { type: 'button', class: 'tcard', onClick: () => testForm(p, d, u) },
+      h('div', { class: 'row between' }, h('b', null, u.code), h('span', { class: 'muted small' }, t.inspector || '')),
+      h('div', { class: 'tc-grid' },
+        item('هبوط الضغط', c.H, c.I), item('الفاكيوم', t.vacuum_microns, c.N), item('فرق الشحن', c.R === '' ? '' : A.pctText(c.R), c.S))));
   }
 
   function testRow(p, d, u) {

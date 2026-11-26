@@ -201,16 +201,22 @@
       ['audit', 'سجل العمليات', isAdmin()],
       ['backup', 'نسخة احتياطية', isStaff()]
     ].filter((x) => x[2]);
-    return h('header', { class: 'bar' },
+    const header = h('header', { class: 'bar' },
       h('a', { href: '#/home', class: 'logo', onClick: () => { state._stayHome = true; } },
         h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, '❄'),
-        h('span', null, h('strong', null, 'مصاعد السرور'), h('small', null, 'VRF QC Tracker'))),
+        h('span', { class: 'logo-text' }, h('strong', null, 'مصاعد السرور'), h('small', null, 'فحص جودة VRF'))),
       p ? h('span', { class: 'crumb' }, p.client) : null,
-      h('nav', { class: 'bar-nav' }, menu.map(([k, l]) => h('a', { href: '#/' + k, class: r.name === k ? 'on' : '', onClick: k === 'home' ? () => { state._stayHome = true; } : null }, l))),
-      h('div', { class: 'bar-me' },
-        h('span', { class: 'muted small' }, (state.profile.full_name || state.user.email) + ' · ' + ROLES[role()]),
-        h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, title: 'المظهر الفاتح/الداكن', 'aria-label': 'تبديل المظهر' }, 'المظهر'),
-        h('button', { class: 'btn ghost sm', type: 'button', onClick: signOut }, 'خروج')));
+      h('button', { type: 'button', class: 'btn ghost menu-btn', 'aria-label': 'القائمة', 'aria-expanded': 'false', onClick: (e) => {
+        const open = header.classList.toggle('open');
+        e.currentTarget.setAttribute('aria-expanded', String(open));
+      } }, '☰'),
+      h('div', { class: 'bar-menu' },
+        h('nav', { class: 'bar-nav' }, menu.map(([k, l]) => h('a', { href: '#/' + k, class: r.name === k ? 'on' : '', onClick: k === 'home' ? () => { state._stayHome = true; } : null }, l))),
+        h('div', { class: 'bar-me' },
+          h('span', { class: 'muted small' }, (state.profile.full_name || state.user.email) + ' · ' + ROLES[role()]),
+          h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, title: 'المظهر الفاتح/الداكن', 'aria-label': 'تبديل المظهر' }, 'المظهر'),
+          h('button', { class: 'btn ghost sm', type: 'button', onClick: signOut }, 'خروج'))));
+    return header;
   }
 
   function applyTheme() {
