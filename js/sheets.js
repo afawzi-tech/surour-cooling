@@ -73,13 +73,27 @@
 
   // شريط سفلي ثابت على الجوال
   function bottomNav(p, active) {
-    const icons = { dashboard: '◧', tracker: '▦', tests: '⏱', ncr: '⚠', guide: '?' };
+    // أيقونات مرسومة بخطوط بسيطة بنفس السماكة
+    const P = {
+      dashboard: ['M3 3h7v7H3z', 'M14 3h7v4h-7z', 'M14 11h7v10h-7z', 'M3 14h7v7H3z'],
+      tracker: ['M3 11l9-7 9 7', 'M5 10v10h14V10', 'M10 20v-6h4v6'],
+      tests: ['M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16z', 'M12 13l4-4', 'M12 2v3'],
+      ncr: ['M12 3l10 18H2z', 'M12 10v5', 'M12 18v.5'],
+      guide: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7', 'M12 17v.5']
+    };
+    const icon = (k) => {
+      const NS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', 'bn-svg');
+      P[k].forEach((d) => { const path = document.createElementNS(NS, 'path'); path.setAttribute('d', d); svg.appendChild(path); });
+      return svg;
+    };
     const short = { dashboard: 'اللوحة', tracker: 'الفلل', tests: 'الفحوصات', ncr: 'NCR', guide: 'المساعدة' };
     const d = S.data[p.id];
     const open = d ? d.ncrs.filter((n) => n.status === 'open').length : 0;
     return h('nav', { class: 'bottom-nav', 'aria-label': 'التنقل' }, SHEETS.map(([k, ar]) =>
       h('a', { href: `#/project/${p.id}/${k}`, class: k === active ? 'on' : '', 'aria-label': ar, 'aria-current': k === active ? 'page' : null },
-        h('span', { class: 'bn-ico', 'aria-hidden': 'true' }, icons[k], k === 'ncr' && open ? h('i', { class: 'bn-badge' }, String(open)) : null),
+        h('span', { class: 'bn-ico' }, icon(k), k === 'ncr' && open ? h('i', { class: 'bn-badge' }, String(open)) : null),
         h('span', null, short[k]))));
   }
 

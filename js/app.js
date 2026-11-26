@@ -203,8 +203,7 @@
     ].filter((x) => x[2]);
     const header = h('header', { class: 'bar' },
       h('a', { href: '#/home', class: 'logo', onClick: () => { state._stayHome = true; } },
-        h('span', { class: 'brand-mark', 'aria-hidden': 'true' }, '❄'),
-        h('span', { class: 'logo-text' }, h('strong', null, 'مصاعد السرور'), h('small', null, 'فحص جودة VRF'))),
+        logo(), h('span', { class: 'logo-text' }, 'فحص جودة VRF')),
       p ? h('span', { class: 'crumb' }, p.client) : null,
       h('button', { type: 'button', class: 'btn ghost menu-btn', 'aria-label': 'القائمة', 'aria-expanded': 'false', onClick: (e) => {
         const open = header.classList.toggle('open');
@@ -231,27 +230,36 @@
     try { localStorage.setItem('surour_theme', next); } catch (e) { /* */ }
   }
 
+  const logo = (cls = '') => h('span', { class: 'logo-img ' + cls },
+    h('img', { src: 'img/sorror-logo.png', alt: 'سرور', class: 'on-light', width: 565, height: 167 }),
+    h('img', { src: 'img/sorror-logo-light.png', alt: '', 'aria-hidden': 'true', class: 'on-dark', width: 565, height: 167 }));
+
   /* ---------- الدخول ---------- */
   function renderSetupNeeded() {
     clear(root).appendChild(h('div', { class: 'auth' }, h('div', { class: 'auth-card' },
       h('h1', null, 'التطبيق غير مربوط بقاعدة البيانات'), h('p', { class: 'muted' }, 'أضف الرابط ومفتاح anon في js/config.js.'))));
   }
   function viewLogin() {
-    const email = h('input', { type: 'email', id: 'email', autocomplete: 'username', dir: 'ltr', required: true });
+    const email = h('input', { type: 'email', id: 'email', autocomplete: 'username', dir: 'ltr', required: true, inputmode: 'email' });
     const pass = h('input', { type: 'password', id: 'password', autocomplete: 'current-password', dir: 'ltr', required: true });
     const err = h('p', { class: 'err', role: 'alert' });
     const btn = h('button', { class: 'btn primary block', type: 'submit' }, 'تسجيل الدخول');
-    return h('div', { class: 'auth' }, h('form', { class: 'auth-card', onSubmit: async (e) => {
-      e.preventDefault(); err.textContent = ''; btn.disabled = true;
-      const { error } = await state.sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
-      btn.disabled = false;
-      if (error) err.textContent = errText(error);
-    } },
-      h('span', { class: 'brand-mark big', 'aria-hidden': 'true' }, '❄'),
-      h('h1', null, 'مصاعد السرور'),
-      h('p', { class: 'muted' }, 'متابعة فحص جودة تركيب VRF'),
-      field('البريد الإلكتروني', email), field('كلمة المرور', pass), err, btn,
-      h('p', { class: 'muted small' }, 'الحسابات يُنشئها المدير.')));
+    // قطعة من مخطط المجمّع كخلفية: فلل بدرجات الإنجاز
+    const pattern = h('div', { class: 'auth-plan', 'aria-hidden': 'true' },
+      Array.from({ length: 60 }, (_, i) => h('i', { class: 'p' + ([0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 1, 0, 4, 0, 0, 2, 0, 5, 0, 0][(i * 7) % 20]) })));
+    return h('div', { class: 'auth2' },
+      h('section', { class: 'auth-brand' }, pattern,
+        h('div', { class: 'auth-brand-in' }, logo('big'),
+          h('p', null, 'متابعة فحص جودة تركيب VRF في الفلل، فيلا فيلا ومرحلة مرحلة.'))),
+      h('form', { class: 'auth-form', onSubmit: async (e) => {
+        e.preventDefault(); err.textContent = ''; btn.disabled = true; btn.textContent = 'جارٍ الدخول…';
+        const { error } = await state.sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
+        btn.disabled = false; btn.textContent = 'تسجيل الدخول';
+        if (error) err.textContent = errText(error);
+      } },
+        h('h1', null, 'تسجيل الدخول'),
+        field('البريد الإلكتروني', email), field('كلمة المرور', pass), err, btn,
+        h('p', { class: 'muted small' }, 'الحسابات يُنشئها المدير. إذا نسيت كلمة المرور فتواصل معه.')));
   }
   function viewInactive() {
     return h('div', { class: 'auth' }, h('div', { class: 'auth-card' }, h('h1', null, 'الحساب غير مفعّل'),
