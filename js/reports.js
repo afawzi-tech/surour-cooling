@@ -341,5 +341,5 @@
     }
   };
 
-  window.Reports = { nowCardPart, stepBadge, stageHistory, homeBox, reviewDialog, pendingFor, canReport };
+  window.Reports = { nowCardPart, stepBadge, stageHistory, homeBox, reviewDialog, pendingFor, canReport, shrink, photoEl, since, BUCKET };
 })();

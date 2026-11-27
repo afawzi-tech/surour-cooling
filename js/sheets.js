@@ -110,17 +110,17 @@
   }
 
   function stagesProject(p, r) {
-    const tab = r.tab === 'settings' ? 'settings' : 'stages';
+    const tab = r.tab === 'settings' ? 'settings' : r.tab === 'tasks' && window.Tasks ? 'tasks' : 'stages';
     const meta = [A.PTYPES[p.project_type], p.governorate, p.city, p.brand].filter(Boolean).join('، ');
     return h('div', { class: 'book stages-book' },
       h('div', { class: 'book-head' },
         h('div', null, h('a', { href: '#/projects', class: 'link small back' }, '→ كل المشاريع'), h('h1', null, p.client),
           meta ? h('p', { class: 'muted small' }, meta) : null)),
       h('nav', { class: 'sheet-tabs', 'aria-label': 'أقسام المشروع' },
-        [['stages', 'مراحل العمل'], ['settings', 'بيانات المشروع']].map(([k, l]) =>
+        [['stages', 'مراحل العمل'], window.Tasks ? ['tasks', 'المهام'] : null, ['settings', 'بيانات المشروع']].filter(Boolean).map(([k, l]) =>
           h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null }, l))),
-      tab === 'settings' ? null : clientCard(p, A.stageProgress(p)),
-      h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : stagesSheet(p)));
+      tab === 'stages' ? clientCard(p, A.stageProgress(p)) : null,
+      h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : tab === 'tasks' ? window.Tasks.projectPanel(p) : stagesSheet(p)));
   }
 
   function stagesSheet(p) {

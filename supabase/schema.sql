@@ -856,6 +856,146 @@ revoke execute on function public.tech_performance(date, date) from public, anon
 grant execute on function public.tech_performance(date, date) to authenticated;
 
 -- ==========================================================
+-- مهام المشروع (فكرة من TaskFlow): مهمة لها عنوان ومسؤول (فني) وموعد وأولوية،
+-- وقد ترتبط بمرحلة. المدير والمشرف ينشئونها ويعدّلونها ويحرّكونها مباشرة.
+-- الفني لا يعدّل المهمة: يرسل تقريراً (بدأت/أنجزت) عن مهمة مسندة له، ويطبَّق بعد الموافقة.
+-- ==========================================================
+create table if not exists public.project_tasks (
+  id           uuid primary key default gen_random_uuid(),
+  project_id   uuid not null references public.projects (id) on delete cascade,
+  checkpoint   text references public.qc_checkpoints (key),
+  title        text not null check (char_length(btrim(title)) between 1 and 200),
+  details      text check (char_length(details) <= 2000),
+  priority     text not null default 'normal' check (priority in ('urgent', 'high', 'normal')),
+  status       text not null default 'todo' check (status in ('todo', 'in_progress', 'done')),
+  assignee     uuid references public.profiles (id) on delete set null,
+  due_date     date,
+  position     double precision not null default 0,
+  started_at   timestamptz,
+  done_at      timestamptz,
+  created_by   uuid references public.profiles (id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists project_tasks_project_idx on public.project_tasks (project_id, status, position);
+create index if not exists project_tasks_assignee_idx on public.project_tasks (assignee) where status <> 'done';
+
+-- أوقات البدء والإنجاز تُملأ على الخادم عند تغيّر الحالة، والمنشئ لا يتغيّر
+create or replace function public.project_task_stamp()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  new.title := btrim(new.title);
+  new.details := nullif(btrim(new.details), '');
+  new.updated_at := now();
+  if tg_op = 'INSERT' then
+    new.created_by := auth.uid(); new.created_at := now();
+  else
+    new.created_by := old.created_by; new.created_at := old.created_at;
+  end if;
+  if new.status = 'todo' then new.started_at := null; new.done_at := null;
+  elsif new.status = 'in_progress' then
+    new.started_at := coalesce(case when tg_op = 'UPDATE' then old.started_at end, now()); new.done_at := null;
+  else
+    new.started_at := coalesce(case when tg_op = 'UPDATE' then old.started_at end, now());
+    new.done_at := coalesce(case when tg_op = 'UPDATE' and old.status = 'done' then old.done_at end, now());
+  end if;
+  return new;
+end $$;
+drop trigger if exists project_tasks_stamp on public.project_tasks;
+create trigger project_tasks_stamp before insert or update on public.project_tasks
+  for each row execute function public.project_task_stamp();
+drop trigger if exists audit_project_tasks on public.project_tasks;
+create trigger audit_project_tasks after insert or update or delete on public.project_tasks
+  for each row execute function public.write_audit();
+
+alter table public.project_tasks enable row level security;
+revoke all on public.project_tasks from anon;
+grant select, insert, update, delete on public.project_tasks to authenticated;
+drop policy if exists tasks_select on public.project_tasks;
+create policy tasks_select on public.project_tasks for select to authenticated using (public.app_role() is not null);
+drop policy if exists tasks_insert on public.project_tasks;
+create policy tasks_insert on public.project_tasks for insert to authenticated with check (public.is_staff());
+drop policy if exists tasks_update on public.project_tasks;
+create policy tasks_update on public.project_tasks for update to authenticated using (public.is_staff()) with check (public.is_staff());
+drop policy if exists tasks_delete on public.project_tasks;
+create policy tasks_delete on public.project_tasks for delete to authenticated using (public.is_staff());
+
+-- تقرير الفني عن مهمة: بدأت أو أُنجزت، مع ملاحظة وصورة اختيارية (في مخزن stage-photos نفسه)
+create table if not exists public.task_requests (
+  id            uuid primary key default gen_random_uuid(),
+  task_id       uuid not null references public.project_tasks (id) on delete cascade,
+  action        text not null check (action in ('start', 'done')),
+  note          text check (char_length(note) <= 1000),
+  photo_path    text check (char_length(photo_path) <= 200),
+  status        text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  requested_by  uuid references public.profiles (id) on delete set null default auth.uid(),
+  requested_at  timestamptz not null default now(),
+  reviewed_by   uuid references public.profiles (id) on delete set null,
+  reviewed_at   timestamptz,
+  review_note   text check (char_length(review_note) <= 500)
+);
+create unique index if not exists task_requests_one_pending on public.task_requests (task_id) where status = 'pending';
+
+create or replace function public.task_request_check()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare t public.project_tasks; me uuid := auth.uid();
+begin
+  new.requested_by := me; new.requested_at := now(); new.status := 'pending';
+  new.reviewed_by := null; new.reviewed_at := null; new.review_note := null;
+  new.note := nullif(btrim(new.note), '');
+  select * into t from public.project_tasks where id = new.task_id;
+  if not found or public.app_role() is null or t.assignee is distinct from me then
+    raise exception 'هذه المهمة غير مسندة لك' using errcode = '42501';
+  end if;
+  if new.action = 'start' and t.status <> 'todo' then raise exception 'المهمة بدأت من قبل';
+  elsif new.action = 'done' and t.status = 'done' then raise exception 'المهمة منجزة';
+  end if;
+  if new.photo_path is not null and new.photo_path !~ ('^' || t.project_id::text || '/' || me::text || '/[0-9a-f-]{36}\.(jpg|png|webp)$') then
+    raise exception 'مسار الصورة غير صالح';
+  end if;
+  return new;
+end $$;
+drop trigger if exists task_requests_check on public.task_requests;
+create trigger task_requests_check before insert on public.task_requests
+  for each row execute function public.task_request_check();
+drop trigger if exists audit_task_requests on public.task_requests;
+create trigger audit_task_requests after insert or update or delete on public.task_requests
+  for each row execute function public.write_audit();
+
+create or replace function public.review_task_request(req uuid, approve boolean, reason text default null)
+returns public.task_requests language plpgsql security definer set search_path = public as $$
+declare r public.task_requests;
+begin
+  if not coalesce(public.is_staff(), false) then raise exception 'المراجعة للمدير والمشرف فقط' using errcode = '42501'; end if;
+  select * into r from public.task_requests where id = req for update;
+  if not found then raise exception 'الطلب غير موجود'; end if;
+  if r.status <> 'pending' then raise exception 'هذا الطلب رُوجع من قبل'; end if;
+  reason := nullif(btrim(reason), '');
+  if not approve and reason is null then raise exception 'اكتب سبب الرفض'; end if;
+  if approve then
+    update public.project_tasks set status = case when r.action = 'start' then 'in_progress' else 'done' end
+    where id = r.task_id and status <> 'done' and (r.action = 'done' or status = 'todo');
+  end if;
+  update public.task_requests set status = case when approve then 'approved' else 'rejected' end,
+    reviewed_by = auth.uid(), reviewed_at = now(), review_note = left(reason, 500)
+  where id = req returning * into r;
+  return r;
+end $$;
+
+alter table public.task_requests enable row level security;
+revoke all on public.task_requests from anon;
+grant select, insert, delete on public.task_requests to authenticated;
+revoke execute on function public.project_task_stamp(), public.task_request_check(), public.review_task_request(uuid, boolean, text) from public, anon;
+grant execute on function public.review_task_request(uuid, boolean, text) to authenticated;
+drop policy if exists task_requests_select on public.task_requests;
+create policy task_requests_select on public.task_requests for select to authenticated using (public.app_role() is not null);
+drop policy if exists task_requests_insert on public.task_requests;
+create policy task_requests_insert on public.task_requests for insert to authenticated with check (public.app_role() is not null and requested_by = auth.uid());
+drop policy if exists task_requests_delete on public.task_requests;
+create policy task_requests_delete on public.task_requests for delete to authenticated
+  using ((requested_by = auth.uid() and status = 'pending') or public.is_admin());
+
+-- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:
 --   update public.profiles set role = 'admin'
 --   where id = (select id from auth.users where email = 'you@example.com');

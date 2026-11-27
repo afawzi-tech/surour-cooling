@@ -342,6 +342,7 @@
     techs: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
     reports: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M8 12l2.5 2.5L16 9', 'M8 18h8'],
     calendar: ['M4 5h16v16H4z', 'M4 10h16', 'M8 3v4', 'M16 3v4', 'M8 14h2', 'M14 14h2', 'M8 18h2'],
+    tasks: ['M4 5h4v4H4z', 'M4 15h4v4H4z', 'M11 7h9', 'M11 17h9', 'M5 7l1 1 2-2'],
     search: ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z', 'M21 21l-5-5'],
     more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
   };
@@ -358,6 +359,7 @@
     const menu = [
       ['home', 'لوحة التحكم', true],
       ['projects', 'المشاريع', true],
+      ['tasks', isStaff() ? 'المهام' : 'مهامي', !!window.Tasks],
       ['crews', 'الفرق والمقاولون', true],
       ['calendar', 'تقويم المواعيد', true],
       ['techs', isStaff() ? 'أداء الفنيين' : 'أدائي', true],
@@ -368,7 +370,7 @@
       ['backup', 'نسخة احتياطية', isStaff()]
     ].filter((x) => x[2]);
     const stay = (k) => (k === 'home' ? () => { state._stayHome = true; } : null);
-    const SHORT = { calendar: 'المواعيد', home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات', techs: isStaff() ? 'الأداء' : 'أدائي' };
+    const SHORT = { tasks: isStaff() ? 'المهام' : 'مهامي', calendar: 'المواعيد', home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات', techs: isStaff() ? 'الأداء' : 'أدائي' };
     const link = ([k, l]) => h('a', { href: '#/' + k, class: navOn === k ? 'on' : '', 'aria-current': navOn === k ? 'page' : null, onClick: stay(k), 'aria-label': l }, icon(k),
       h('span', { class: 'nl-full' }, l), SHORT[k] ? h('span', { class: 'nl-short', 'aria-hidden': 'true' }, SHORT[k]) : null);
     const me = h('div', { class: 'side-me' },
@@ -515,7 +517,7 @@
   }
 
   async function home() {
-    await Promise.all(state.projects.filter(isCompound).map((p) => loadProject(p.id)));
+    await Promise.all([...state.projects.filter(isCompound).map((p) => loadProject(p.id)), window.Tasks ? window.Tasks.ensure() : null]);
     const f = { gov: '', brand: '', st: '' };   // اللوحة لا تصفّي نفسها: الضغط يفتح صفحة المشاريع مصفّاة
     const openList = (patch) => { state._pf = { ...PF_DEFAULT, ...patch }; go('projects'); };
     const rows = state.projects.map(projInfo);
@@ -629,6 +631,7 @@
         stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
         stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('متأخرة', lateN, lateN ? 'bad' : 'muted', 'late'), stat('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'muted', 'attn')),
       window.Reports ? window.Reports.homeBox() : null,
+      window.Tasks ? window.Tasks.homeBox() : null,
       window.Insights ? window.Insights.homeBoxes(rows) : null,
       h('section', { class: 'd2-pipe' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'أين تقف المشاريع'),
         h('span', { class: 'd2-note' }, 'عدد المشاريع عند كل مرحلة' + (rows.some((r) => r.compound) ? '. المجمّعات تُتابَع وحدةً وحدة في قسمها' : ''))), pipe),
