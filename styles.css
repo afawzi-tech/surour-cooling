@@ -1656,3 +1656,125 @@ a.pill-btn:active { transform: scale(.96); }
 .pf-main small { color: var(--muted); font-size: .8rem; }
 .chip.pf-staff { background: var(--doing-soft); color: var(--doing); }
 .pf-act { display: flex; gap: 6px; }
+
+/* ==========================================================
+   هوية سرور 2026: "دقّة التبريد"
+   كحلي الشعار للنص والهيكل، سماوي الشعار للبيانات والتقدّم،
+   ونحاسي (لون أنابيب التبريد) لإجراء واحد مهم في كل شاشة.
+   الخط: Readex Pro للعناوين والأرقام والتنقّل (حروف عريضة واضحة)،
+   وIBM Plex Sans Arabic للنصوص والجداول.
+   كل لون نص هنا يحقّق تباين AA (4.5:1) على خلفيته.
+   ========================================================== */
+:root {
+  --f-head: 'Readex Pro', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --f-body: 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --navy: #143656; --navy-2: #0E2740; --sky: #34A0D0; --sky-ink: #11689A; --sky-soft: #E3F2FA;
+  --copper: #B4531F; --copper-ink: #FFFFFF; --copper-soft: #FBEADF;
+  --bg: #F2F6F9; --surface: #FFFFFF; --surface-2: #EAF1F6; --text: #0F2236; --muted: #4A5F73; --line: #D3DFE8;
+  --brand: #143656; --brand-ink: #FFFFFF; --brand-soft: #E3F2FA;
+  --done: #17703F; --done-soft: #E1F4E9; --doing: #8F5300; --doing-soft: #FFF1D6; --danger: #B3261E; --danger-soft: #FDE8E6;
+  --ring-ok: #34A0D0; --ring-warn: #E08A00; --ring-bad: #D93A2F; --ring-done: #1F8A4C; --ring-track: #DCE7EF;
+  --ink: #0F2236; --ink-2: #4A5F73;
+  --shadow: 0 1px 2px rgb(15 34 54 / 6%);
+  --r-card: 16px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --navy: #E6F0F8; --navy-2: #08131F; --sky: #5BB8E2; --sky-ink: #7CC8EC; --sky-soft: #12324A;
+    --copper: #E2874F; --copper-ink: #1A0B03; --copper-soft: #3A2114;
+    --bg: #0A1622; --surface: #102236; --surface-2: #163049; --text: #E6F0F8; --muted: #A3B6C8; --line: #24405A;
+    --brand: #7CC8EC; --brand-ink: #06233A; --brand-soft: #12324A;
+    --done: #5FD08F; --done-soft: #12341F; --doing: #F3B44A; --doing-soft: #3A2A10; --danger: #FF8A80; --danger-soft: #3E1A18;
+    --ring-track: #22405C; --ink: #E6F0F8; --ink-2: #A3B6C8; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --navy: #E6F0F8; --navy-2: #08131F; --sky: #5BB8E2; --sky-ink: #7CC8EC; --sky-soft: #12324A;
+  --copper: #E2874F; --copper-ink: #1A0B03; --copper-soft: #3A2114;
+  --bg: #0A1622; --surface: #102236; --surface-2: #163049; --text: #E6F0F8; --muted: #A3B6C8; --line: #24405A;
+  --brand: #7CC8EC; --brand-ink: #06233A; --brand-soft: #12324A;
+  --done: #5FD08F; --done-soft: #12341F; --doing: #F3B44A; --doing-soft: #3A2A10; --danger: #FF8A80; --danger-soft: #3E1A18;
+  --ring-track: #22405C; --ink: #E6F0F8; --ink-2: #A3B6C8; --shadow: none;
+}
+
+/* الخط: حجم أساسي 16، وأوزان لا تقل عن 400 للنص الصغير */
+body { font-family: var(--f-body); font-size: 16px; line-height: 1.7; letter-spacing: 0; }
+h1, h2, h3 { font-family: var(--f-head); letter-spacing: 0; }
+h1 { font-weight: 700; } h2, h3 { font-weight: 600; }
+.small, small { font-weight: 500; }
+b, strong { font-weight: 700; }
+.num, .stat-chip b, .st-face b, .cc-pct, .ph-pct strong, .pp-c { font-family: var(--f-head); font-feature-settings: 'tnum'; }
+
+/* القائمة الجانبية: لوح كحلي ثابت هو توقيع الهوية على الكمبيوتر */
+.side { background: var(--navy-2, #0E2740); background: linear-gradient(180deg, #143656 0%, #0E2740 100%); border-inline-end: 0; color: #E6F0F8; }
+.side-logo { color: #B9CEE0; border-bottom-color: rgb(255 255 255 / 12%); }
+.side .logo-img .on-light { display: none; } .side .logo-img .on-dark { display: block; }
+.side-nav a { color: #D5E3EF; font-weight: 500; }
+.side-nav a:hover { background: rgb(255 255 255 / 8%); color: #FFFFFF; }
+.side-nav a.on { background: #FFFFFF; color: #143656; font-weight: 700; box-shadow: inset -4px 0 0 var(--copper); }
+.side-nav a:focus-visible, .side button:focus-visible { outline: 3px solid #7CC8EC; outline-offset: 2px; }
+.side-proj { background: rgb(255 255 255 / 8%); }
+.side-proj small, .side-me .who small { color: #B9CEE0; }
+.side-proj a, .side-me .who b { color: #FFFFFF; }
+.side-me { border-top-color: rgb(255 255 255 / 12%); }
+.side-me .btn.ghost, .side-me button { color: #D5E3EF; }
+.side-me .btn.ghost:hover { background: rgb(255 255 255 / 8%); color: #fff; }
+.side .side-search { background: rgb(255 255 255 / 8%); border-color: rgb(255 255 255 / 16%); color: #D5E3EF; }
+.side .side-search kbd { background: transparent; color: #B9CEE0; border-color: rgb(255 255 255 / 25%); }
+.side .side-bell, .side .side-bell * { color: #E6F0F8; }
+:root[data-theme="dark"] .side { background: #08131F; border-inline-end: 1px solid var(--line); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .side { background: #08131F; border-inline-end: 1px solid var(--line); } }
+:root[data-theme="dark"] .side-nav a.on { background: #12324A; color: #FFFFFF; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .side-nav a.on { background: #12324A; color: #FFFFFF; } }
+
+/* الأزرار: الأساسي كحلي، والإجراء الأهم نحاسي */
+.btn { font-family: var(--f-head); font-weight: 600; border-radius: 12px; }
+.btn.primary { background: var(--navy); border-color: var(--navy); color: var(--brand-ink); }
+:root[data-theme="dark"] .btn.primary { background: #7CC8EC; border-color: #7CC8EC; color: #06233A; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.primary { background: #7CC8EC; border-color: #7CC8EC; color: #06233A; } }
+.btn.accent, .mbar-plus { background: var(--copper) !important; color: var(--copper-ink) !important; border-color: var(--copper) !important; }
+:focus-visible { outline-color: var(--sky-ink); }
+
+/* البطاقات: مسطّحة بحدّ واضح بدل الظلال */
+.fc, .card, .now-card { border-color: var(--line); box-shadow: var(--shadow); }
+.fc-h h2, .sec-t { font-family: var(--f-head); font-weight: 600; color: var(--text); }
+.sec-t { display: flex; align-items: center; gap: 8px; }
+.sec-t::before { content: ''; width: 10px; height: 10px; border-radius: 3px; background: var(--sky); box-shadow: 3px 3px 0 var(--navy); flex: none; }
+
+/* الحلقات: مقياس ضغط (مانوميتر) بقوس 270° بدل دائرة كاملة، والنسبة واضحة في الوسط */
+.st-ring { background: conic-gradient(from 225deg, var(--c) calc(var(--p) * 2.7deg), var(--ring-track) 0 270deg, transparent 0); }
+.st-ring::after { content: ''; position: absolute; bottom: 4%; inset-inline: 32%; height: 3px; border-radius: 2px; background: var(--c); opacity: .9; }
+.st-face { border: 0; box-shadow: none; width: calc(100% - 10px); height: calc(100% - 10px); }
+.st-face b { color: var(--text); font-weight: 700; }
+.story .st-face b { font-size: .98rem; }
+.story .st-name { font-size: .8rem; font-weight: 600; color: var(--text); }
+.story.late .st-name { color: var(--danger); }
+.story.add .st-ring { background: var(--copper); }
+.story.add .st-ring::after { display: none; }
+.story.add .st-face { background: transparent; }
+.story.add .st-face b { color: #FFFFFF; font-size: 2rem; }
+
+/* شرائح الأرقام */
+.stat-chip { font-family: var(--f-head); font-weight: 500; color: var(--text); }
+.stat-chip.run b { color: var(--sky-ink); }
+.stat-chip.warn b { color: var(--doing); }
+.stat-chip.bad b { color: var(--danger); }
+
+/* الشارات (chips): نص داكن على خلفية فاتحة دائماً */
+.chip { font-weight: 600; }
+
+/* الهاتف: شريط علوي كحلي بالشعار الفاتح، وشريط سفلي أبيض بزر نحاسي */
+@media (max-width: 760px) {
+  .mtop { background: #143656; box-shadow: none; color: #FFFFFF; }
+  .mtop .logo-img .on-light { display: none; } .mtop .logo-img .on-dark { display: block; }
+  .mtop-crumb { color: #FFFFFF; }
+  .mtop button, .mtop a, .mtop .ico { color: #FFFFFF; }
+  .mbar { box-shadow: 0 -1px 0 var(--line), 0 -6px 18px rgb(15 34 54 / 8%); }
+  .mbar > a, .mb-more > summary { font-family: var(--f-head); font-weight: 500; color: var(--muted); font-size: .8rem; }
+  .mbar > a.on, .mb-more > summary.on { color: var(--navy); font-weight: 700; }
+  .mbar > a.on::before { background: var(--copper); top: -4px; height: 3px; }
+  :root[data-theme="dark"] .mtop { background: #08131F; border-bottom: 1px solid var(--line); }
+}
+@media (max-width: 760px) and (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .mtop { background: #08131F; border-bottom: 1px solid var(--line); } }
+/* الحلقات الصغيرة: مقياس فقط بلا حرف (النسبة مكتوبة بجانبها) */
+.st-ring.sm .st-face b, .st-ring.xs .st-face b { display: none; }

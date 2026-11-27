@@ -539,7 +539,7 @@
     // ---- دوائر المشاريع (مثل الستوري): الجارية أولاً، والمتأخرة بحلقة حمراء
     const storyRows = rows.filter((r) => r.status !== 'done').sort((a, b) => (b.bad - a.bad) || (b.why.length - a.why.length) || ({ in_progress: 0, not_started: 1 }[a.status] - { in_progress: 0, not_started: 1 }[b.status]));
     const story = (r) => h('a', { href: '#/project/' + r.p.id, class: 'story ' + (r.sc?.late || r.bad ? 'late' : r.sc?.behind || r.why.length ? 'warn' : r.status), title: `${r.p.client} · ${pctText(r.pct)}` },
-      h('span', { class: 'st-ring', style: ringStyle(r.pct) }, h('span', { class: 'st-face' }, h('b', null, initials(r.p.client)), h('small', null, pctText(r.pct)))),
+      h('span', { class: 'st-ring', style: ringStyle(r.pct) }, h('span', { class: 'st-face' }, h('b', null, pctText(r.pct)))),
       h('span', { class: 'st-name' }, r.p.client));
     const stories = h('div', { class: 'stories', role: 'list', 'aria-label': 'المشاريع الجارية' },
       isStaff() ? h('button', { type: 'button', class: 'story add', onClick: newProject, role: 'listitem' },
