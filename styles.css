@@ -1103,3 +1103,4 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
   .pl-row.late .c-due small { display: none; }
   .pl-row .c-cust small { padding-inline-start: 8px; }
 }
+.is-hidden, [hidden] { display: none !important; }

@@ -929,16 +929,20 @@
       due: h('input', { type: 'date', value: p.due_date || '', dir: 'ltr' })
     };
     const dl = h('datalist', { id: 'brand-list' }, BRAND_SUGGEST.map((b) => h('option', { value: b })));
+    // اسم الوحدة يخص المجمّعات السكنية فقط
+    const labelF = field('اسم الوحدة', el.label, { hint: 'كيف تُسمّى وحدات المجمّع: فيلا، شقة، بيت…' });
+    const syncLabel = () => { labelF.classList.toggle('is-hidden', el.type.value !== 'compound'); };
+    el.type.addEventListener('change', syncLabel); syncLabel();
     const grid = h('div', { class: 'form-grid' },
       field('اسم المشروع', el.name, { wide: true }), field('المحافظة', el.gov), field('المدينة', el.city),
-      field('الماركة', el.brand), field('نوع المشروع', el.type), field('اسم الوحدة', el.label, { hint: 'كيف تُسمّى وحدات هذا المشروع: فيلا، شقة، طابق…' }), dl,
+      field('الماركة', el.brand), field('نوع المشروع', el.type), labelF, dl,
       h('h3', { class: 'fg-title wide' }, 'العميل والموقع'),
       field('اسم العميل', el.cust), field('هاتف العميل', el.phone), field('عنوان الموقع', el.addr, { wide: true }),
       field('رابط الموقع على الخريطة', el.map, { wide: true, hint: 'افتح الموقع في خرائط Google، واضغط مشاركة، وانسخ الرابط' }),
       h('h3', { class: 'fg-title wide' }, 'العقد والمواعيد'),
       field('تاريخ العقد', el.contract), field('تاريخ البدء المخطط', el.start), field('تاريخ التسليم', el.due, { hint: 'يصير المشروع متأخراً إذا فات هذا التاريخ ولم يكتمل' }));
     const values = () => ({ client: el.name.value.trim(), governorate: el.gov.value || null, city: el.city.value.trim() || null,
-      brand: el.brand.value.trim() || null, project_type: el.type.value, unit_label: el.label.value,
+      brand: el.brand.value.trim() || null, project_type: el.type.value, unit_label: el.type.value === 'compound' ? el.label.value : (p.unit_label || 'وحدة'),
       customer_name: el.cust.value.trim() || null, customer_phone: el.phone.value.trim() || null, site_address: el.addr.value.trim() || null,
       map_url: el.map.value.trim() || null, contract_date: el.contract.value || p.contract_date || todayStr(), start_date: el.start.value || null, due_date: el.due.value || null });
     // التحقق هنا للتوضيح فقط، والقاعدة تفرض نفس الشروط
@@ -961,7 +965,7 @@
     const unitsBox = h('div', { class: 'form-grid' },
       field('عدد الوحدات', count, { hint: 'ضع 0 إذا ستستورد ملف Excel للمجمّع' }),
       field('بادئة الترقيم', prefix, { hint: 'مثال: V- تعطي V-001، V-002…' }));
-    const syncUnits = () => { unitsBox.hidden = pf.el.type.value !== 'compound'; if (unitsBox.hidden) count.value = 0; };
+    const syncUnits = () => { const off = pf.el.type.value !== 'compound'; unitsBox.classList.toggle('is-hidden', off); if (off) count.value = 0; };
     pf.el.type.addEventListener('change', syncUnits); syncUnits();
     modal('مشروع جديد', h('div', { class: 'stack sm' }, pf.grid, unitsBox),
     [{ label: 'إنشاء المشروع', cls: 'primary', run: async () => {
