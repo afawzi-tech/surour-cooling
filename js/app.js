@@ -376,7 +376,7 @@
       const d = state.data[p.id];
       const D = F.dashboard(d, state.checkpoints);
       const rows = d.units.map((u) => F.row(u, state.checkpoints, openNcrsOf(d, u.id)));
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayStr();
       const fails = rows.filter((k) => k.R).length;
       const late = d.ncrs.filter((n) => n.status === 'open' && n.due_date && n.due_date < today).length;
       const status = D.B3 && D.B4 === D.B3 ? 'done' : D.B6 === D.B3 ? 'not_started' : 'in_progress';
@@ -438,7 +438,7 @@
             h('span', { class: 'cr-name' }, h('b', null, c.name), h('small', null, KIND_AR[c.kind] + (c.leader ? ' · ' + c.leader : ''))),
             h('span', { class: 'cr-where' }, at.length || ua.length ? [...at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)),
               ...ua.map((x) => h('a', { href: '#/project/' + x.p.id }, `${x.p.client} · ${unitWords(x.p).many} جارية: ${num(x.in_progress)}`))] : 'متاحة'),
-            c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone, dir: 'ltr' }, c.phone) : null);
+            c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, c.phone) : null);
         }))]
         : h('p', { class: 'calm muted' }, isStaff() ? 'لا توجد فرق أو مقاولون بعد. أضفهم من صفحة "الفرق والمقاولون".' : 'لا توجد فرق أو مقاولون بعد.'));
 
@@ -590,7 +590,9 @@
           const words = norm(F0.q).split(' ').filter(Boolean);
           const dq = digits(F0.q);
           const phoneHit = dq.length >= 4 && r.phone.includes(dq);
-          if (!phoneHit && !words.every((w) => r.hay.includes(w))) return false;
+          // الكلمات غير الرقمية تبقى شرطاً حتى مع تطابق الهاتف ("البصرة 0770" لا يُظهر مشروع بغداد)
+          const textWords = words.filter((w) => !/^[0-9٠-٩۰-۹+\-()]+$/.test(w));
+          if (phoneHit ? !textWords.every((w) => r.hay.includes(w)) : !words.every((w) => r.hay.includes(w))) return false;
         }
         return true;
       };
@@ -804,7 +806,7 @@
       const cps = state.checkpoints;
       const fk = '_hf_' + scope;
       const f = state[fk] || (state[fk] = { gov: '', brand: '' });
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayStr();
       const rows = scoped.map((p) => {
         const d = state.data[p.id];
         const D = F.dashboard(d, cps);
@@ -955,7 +957,7 @@
         const g = byUnit.get(x.unit_id); g.items.push(x); if (x.inspected_by) g.who.add(names[x.inspected_by] || '');
       });
       const units = [...byUnit.values()];
-      box.append(h('p', { class: 'd2-note' }, `${num(rows.length)} نتيجة سُجّلت اليوم في ${num(units.length)} وحدة: ناجح ${cnt.pass}، فاشل ${cnt.fail}، لا ينطبق ${cnt.na}.`),
+      window.UI.append(box, [h('p', { class: 'd2-note' }, `${num(rows.length)} نتيجة سُجّلت اليوم في ${num(units.length)} وحدة: ناجح ${cnt.pass}، فاشل ${cnt.fail}، لا ينطبق ${cnt.na}.`),
         h('ol', { class: 'today-list' }, units.slice(0, 10).map(({ x, items, who }) => {
           const fails = items.filter((i) => i.result === 'fail');
           const passes = items.filter((i) => i.result === 'pass').length;
@@ -965,7 +967,7 @@
             h('span', null, fails.length ? `فاشل: ${fails.map((i) => cp[i.checkpoint]).join('، ')}` : `${passes} ناجح` + (items.length > passes ? `، ${items.length - passes} أخرى` : '')),
             h('small', null, [...who].filter(Boolean).join('، ')));
         })),
-        units.length > 10 ? h('p', { class: 'd2-note' }, `و${num(units.length - 10)} وحدة أخرى.`) : null);
+        units.length > 10 ? h('p', { class: 'd2-note' }, `و${num(units.length - 10)} وحدة أخرى.`) : null]);
     }).catch(() => { clear(box).appendChild(h('p', { class: 'calm muted' }, 'تعذّر تحميل نشاط اليوم.')); });
     return box;
   }
@@ -1348,7 +1350,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));

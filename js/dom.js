@@ -6,6 +6,7 @@
   'use strict';
 
   const SAFE_URL = /^https:\/\/\S+$/i;
+  const SAFE_TEL = /^tel:\+?[0-9]{3,20}$/;   // روابط الاتصال: أرقام فقط
 
   /**
    * h('div', { class: 'card', onClick: fn }, 'نص', childNode, [array])
@@ -23,7 +24,7 @@
           el.className = v;
         } else if (k === 'href') {
           const s = String(v);
-          if (s.startsWith('#') || SAFE_URL.test(s)) el.setAttribute('href', s);
+          if (s.startsWith('#') || SAFE_URL.test(s) || SAFE_TEL.test(s)) el.setAttribute('href', s);
         } else if (k === 'value') {
           el.value = v;
         } else if (k === 'checked' || k === 'disabled' || k === 'selected' || k === 'required') {
@@ -53,13 +54,17 @@
   }
 
   /* ---------- رسائل قصيرة ---------- */
-  function toast(msg, type = 'ok') {
+  // action اختياري: { label, run } يظهر زراً (مثل "تراجع") ويُبقي الرسالة 6 ثوانٍ
+  function toast(msg, type = 'ok', action = null) {
     const box = document.getElementById('toasts');
-    const t = h('div', { class: 'toast ' + type }, msg);
+    const t = h('div', { class: 'toast ' + type + (action ? ' has-action' : '') }, h('span', null, msg),
+      action ? h('button', { type: 'button', class: 'toast-act', onClick: () => { t.remove(); action.run(); } }, action.label) : null);
+    if (action) while (box.firstChild) box.firstChild.remove();   // رسالة واحدة فيها إجراء
     box.appendChild(t);
     while (box.children.length > 3) box.firstChild.remove();
-    setTimeout(() => t.classList.add('out'), 3200);
-    setTimeout(() => t.remove(), 3700);
+    const life = action ? 6000 : 3200;
+    setTimeout(() => t.classList.add('out'), life);
+    setTimeout(() => t.remove(), life + 500);
   }
 
   /* ---------- نافذة تأكيد ---------- */

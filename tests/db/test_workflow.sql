@@ -16,7 +16,7 @@ grant select, insert on ids to authenticated;
 select pg_temp.login(:'S');
 insert into public.project_stages (project_id, checkpoint, status, crew_id)
 values ('33333333-3333-3333-3333-333333333333', 'site_ready', 'in_progress', '11111111-1111-1111-1111-111111111111');
-select pg_temp.ok((select start_date = current_date and end_date is null and updated_by = :'S'
+select pg_temp.ok((select start_date = public.today_iq() and end_date is null and updated_by = :'S'
   from public.project_stages where checkpoint = 'site_ready'), 'جارية تملأ تاريخ البدء ومن عدّل');
 insert into public.project_stages (project_id, checkpoint, status, crew_id)
 values ('33333333-3333-3333-3333-333333333333', 'piping', 'not_started', '22222222-2222-2222-2222-222222222222');
@@ -51,7 +51,7 @@ reset role;
 select pg_temp.login(:'S');
 select pg_temp.expect_error(format($$select public.review_stage_request(%L, false, '  ')$$, (select v from ids where k = 'req1')), 'رفض بلا سبب');
 select public.review_stage_request((select v from ids where k = 'req1'), true);
-select pg_temp.ok((select status = 'done' and end_date = current_date from public.project_stages where checkpoint = 'site_ready'), 'الموافقة تكمل المرحلة');
+select pg_temp.ok((select status = 'done' and end_date = public.today_iq() from public.project_stages where checkpoint = 'site_ready'), 'الموافقة تكمل المرحلة');
 select pg_temp.ok((select status = 'in_progress' and crew_id = '11111111-1111-1111-1111-111111111111'
   from public.project_stages where checkpoint = 'equipment_set'), 'المرحلة التالية بدأت وبقيت مع الفرقة');
 select pg_temp.expect_error(format($$select public.review_stage_request(%L, true)$$, (select v from ids where k = 'req1')), 'مراجعة الطلب مرتين');

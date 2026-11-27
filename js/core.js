@@ -114,7 +114,8 @@
      متأخر: فات تاريخ التسليم والمشروع لم يكتمل.
      متأخر عن الجدول: الإنجاز أقل من نسبة الوقت المنقضي (من البدء إلى التسليم) بـ15 نقطة أو أكثر. */
   const BEHIND_GAP = 0.15;
-  const todayStr = () => new Date().toISOString().slice(0, 10);
+  // التاريخ المحلي للجهاز (بغداد UTC+3)، لا UTC، حتى لا يصير "اليوم" أمس بعد منتصف الليل
+  const todayStr = () => new Date().toLocaleDateString('en-CA');
   const dayDiff = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);
   function schedule(p, pct, status, today) {
     const t = today || todayStr();
@@ -137,7 +138,8 @@
   const cntAr = (n, one, two, few, many) => (n === 1 ? one : n === 2 ? two : n >= 3 && n <= 10 ? `${num(n)} ${few}` : `${num(n)} ${many}`);
   const norm = (t) => String(t || '').toLowerCase().normalize('NFKD').replace(/[ً-ٰٟـ]/g, '')
     .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/\s+/g, ' ').trim();
-  const digits = (t) => String(t || '').replace(/[^0-9]/g, '');
+  // أرقام لوحة المفاتيح العربية ٠-٩ و۰-۹ تُعامل مثل 0-9
+  const digits = (t) => String(t || '').replace(/[٠-٩]/g, (c) => c.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (c) => c.charCodeAt(0) - 0x6F0).replace(/[^0-9]/g, '');
 
   // كلمة المرور: 8 أحرف على الأقل فيها حروف إنجليزية وأرقام (نفس قاعدة إعداد Supabase Auth)
   const strongEnough = (p) => p.length >= 8 && p.length <= 72 && /[0-9]/.test(p) && /[A-Za-z]/.test(p);
