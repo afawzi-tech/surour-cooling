@@ -277,6 +277,8 @@
     // حركة الدخول فقط عند تغيّر الصفحة، لا عند إعادة الرسم بعد حفظ أو تصفية
     const entering = location.hash !== state._lastHash;
     state._lastHash = location.hash;
+    // صفحة جديدة تبدأ من الأعلى (لا تبقى بمكان التمرير السابق)
+    if (entering) window.scrollTo(0, 0);
     const main = h('main', { class: 'main' });
     root.appendChild(h('div', { class: 'app app-side' }, ...topbar(r).filter(Boolean), main));
     const done = (n) => { clear(main).appendChild(n); if (entering) { main.classList.add('enter'); countUp(main); } };
@@ -709,151 +711,6 @@
       h('div', { class: 'feed-grid' }, main, side));
   }
 
-  async function home() {
-    await Promise.all(state.projects.filter(isCompound).map((p) => loadProject(p.id)));
-    const f = { gov: '', brand: '', st: '' };   // اللوحة لا تصفّي نفسها: الضغط يفتح صفحة المشاريع مصفّاة
-    const openList = (patch) => { state._pf = { ...PF_DEFAULT, ...patch }; go('projects'); };
-    const rows = state.projects.map(projInfo);
-    const by = (st) => rows.filter((r) => r.status === st).length;
-    const attn = rows.filter((r) => r.why.length).sort((a, b) => (b.bad - a.bad) || (b.why.length - a.why.length));
-    const avg = rows.length ? rows.reduce((a, r) => a + r.pct, 0) / rows.length : 0;
-    const govs = new Set(rows.map((r) => r.p.governorate).filter(Boolean)).size;
-    const STL = { not_started: 'لم يبدأ', in_progress: 'جارٍ', done: 'مكتمل', late: 'متأخر' };
-    const isLate = (r) => !!(r.sc && (r.sc.late || r.sc.behind));
-    const lateN = rows.filter(isLate).length;
-
-    // المواعيد القادمة: المشاريع غير المكتملة بتاريخ تسليم، الأقرب أولاً
-    const dues = rows.filter((r) => r.sc?.has && r.status !== 'done').sort((a, b) => a.sc.daysLeft - b.sc.daysLeft);
-    const duesBox = h('section', { class: 'd2-dues' }, h('h2', null, 'المواعيد القادمة'),
-      dues.length ? h('ol', { class: 'due-list' }, dues.slice(0, 8).map((r) => h('li', { class: r.sc.late ? 'late' : r.sc.behind ? 'behind' : '' },
-        h('a', { href: '#/project/' + r.p.id }, h('b', null, r.p.client), h('small', null, `التسليم ${r.sc.due}`)),
-        h('span', { class: 'due-when' }, r.due),
-        h('span', { class: 'due-bar', title: r.sc.expected !== null ? `الإنجاز ${pctText(r.pct)}، المتوقع حسب الوقت ${pctText(r.sc.expected)}` : `الإنجاز ${pctText(r.pct)}` },
-          h('span', { class: 'db-fill', style: { width: (r.pct * 100).toFixed(1) + '%' } }),
-          r.sc.expected !== null ? h('i', { class: 'db-exp', style: { 'inset-inline-start': (r.sc.expected * 100).toFixed(1) + '%' } }) : null))))
-        : h('p', { class: 'calm muted' }, 'لا توجد مشاريع بتاريخ تسليم. أضف التاريخ من "بيانات المشروع".'),
-      dues.some((r) => r.sc.expected !== null) ? h('p', { class: 'd2-note' }, 'الشريط = الإنجاز، والخط العمودي = المتوقع حسب الوقت المنقضي.') : null);
-
-    // الفرق: أين تعمل كل فرقة الآن (المراحل الجارية المسندة لها)
-    const working = [];
-    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.status === 'in_progress') working.push({ p, x }); }));
-    const cpN = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
-    const crews = state.crews.filter((c) => c.active);
-    const people = working.reduce((a, w) => a + (w.x.crew || 0), 0);
-    const unitsAt = (c) => state.crewUnits.filter((x) => x.crew_id === c.id && x.in_progress > 0).map((x) => ({ ...x, p: state.projects.find((p) => p.id === x.project_id) })).filter((x) => x.p);
-    const busy = crews.filter((c) => working.some((w) => w.x.crew_id === c.id) || unitsAt(c).length);
-    const crewsBox = h('section', { class: 'd2-crews' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'الفرق والمقاولون'),
-      h('a', { href: '#/crews', class: 'link small' }, 'الأداء والتفاصيل')),
-      crews.length ? [h('p', { class: 'd2-note' }, `${num(busy.length)} يعمل الآن، ${num(crews.length - busy.length)} متاح` + (people ? `. ${num(people)} كادر في المراحل الجارية` : '')),
-        h('ul', { class: 'crew-list' }, [...busy, ...crews.filter((c) => !busy.includes(c))].map((c) => {
-          const at = working.filter((w) => w.x.crew_id === c.id), ua = unitsAt(c);
-          return h('li', { class: at.length || ua.length ? 'busy' : 'free' },
-            h('span', { class: 'cr-name' }, h('b', null, c.name), h('small', null, KIND_AR[c.kind] + (c.leader ? ' · ' + c.leader : ''))),
-            h('span', { class: 'cr-where' }, at.length || ua.length ? [...at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)),
-              ...ua.map((x) => h('a', { href: '#/project/' + x.p.id }, `${x.p.client} · ${unitWords(x.p).many} جارية: ${num(x.in_progress)}`))] : 'متاحة'),
-            c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, c.phone) : null);
-        }))]
-        : h('p', { class: 'calm muted' }, isStaff() ? 'لا توجد فرق أو مقاولون بعد. أضفهم من صفحة "الفرق والمقاولون".' : 'لا توجد فرق أو مقاولون بعد.'));
-
-    const lead = !rows.length ? 'لا توجد مشاريع بعد. أنشئ أول مشروع لتبدأ المتابعة.'
-      : cntAr(rows.length, 'مشروع واحد', 'مشروعان', 'مشاريع', 'مشروعاً') + (govs ? ` في ${cntAr(govs, 'محافظة واحدة', 'محافظتين', 'محافظات', 'محافظة')}` : '')
-        + `: ${num(by('in_progress'))} جارٍ و${num(by('done'))} مكتمل` + (rows.some(isLate) ? `، منها ${num(rows.filter(isLate).length)} ${rows.filter(isLate).length === 1 ? 'متأخر عن موعده' : 'متأخرة عن موعدها'}. ` : '. ')
-        + (attn.length ? (attn.length === 1 ? 'مشروع واحد يحتاج انتباهك.' : `${num(attn.length)} مشاريع تحتاج انتباهك.`) : 'لا شيء يحتاج انتباهك الآن.');
-
-    // خريطة المحافظات: متوسط إنجاز مشاريع كل محافظة
-    const band = (v, has) => (!has ? 'none' : v >= 1 ? 'done' : v === 0 ? 'b0' : v < 0.25 ? 'b1' : v < 0.5 ? 'b2' : v < 0.75 ? 'b3' : 'b4');
-    const govMap = h('div', { class: 'gov-map', role: 'list', 'aria-label': 'المشاريع حسب المحافظة' }, GOVS.map(([g, c, r]) => {
-      const rs = rows.filter((x) => x.p.governorate === g);
-      const gp = rs.length ? rs.reduce((a, x) => a + x.pct, 0) / rs.length : 0;
-      const prob = rs.some((x) => x.bad) ? ' flag-fail' : rs.some((x) => x.why.length) ? ' flag-alert' : '';
-      const label = `${g}: ${rs.length ? `${rs.length} مشروع، إنجاز ${pctText(gp)}` : 'لا مشاريع'}`;
-      const el = h('button', { type: 'button', role: 'listitem', class: `gov tile ${band(gp, rs.length)}${prob}${f.gov === g ? ' sel' : ''}`, title: label, 'aria-label': label, 'aria-pressed': String(f.gov === g),
-        onClick: () => openList({ gov: g }) }, h('span', { class: 'g-name' }, g), rs.length ? h('b', null, String(rs.length)) : null);
-      el.style.gridColumn = String(c); el.style.gridRow = String(r);
-      return el;
-    }));
-    const noGov = rows.filter((r) => !r.p.governorate).length;
-
-    // أين تقف المشاريع: عدد المشاريع الواقفة عند كل مرحلة
-    const stageRows = rows.filter((r) => !r.compound);
-    const pipe = h('ol', { class: 'pipe' }, state.checkpoints.map((c) => {
-      const here = stageRows.filter((r) => r.curKey === c.key);
-      return h('li', { class: here.length ? 'has' : '' }, h('span', { class: 'pp-n' }, num(c.position)), h('span', { class: 'pp-name' }, c.name_ar),
-        h('b', { class: 'pp-c' }, here.length ? num(here.length) : '·'),
-        here.length ? h('small', null, here.slice(0, 3).map((x) => x.p.client).join('، ') + (here.length > 3 ? '…' : '')) : null);
-    }));
-
-    // حسب الماركة
-    const brands = [...new Set(rows.map((r) => r.p.brand || 'غير محددة'))].sort();
-    const byBrand = brands.map((b) => {
-      const rs = rows.filter((r) => (r.p.brand || 'غير محددة') === b);
-      return { b, n: rs.length, pct: rs.reduce((a, x) => a + x.pct, 0) / rs.length };
-    });
-
-    // نشاط اليوم: مراحل تحرّكت اليوم
-    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-    const moved = [];
-    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.updated_at && new Date(x.updated_at) >= t0 && x.status !== 'not_started') moved.push({ p, x }); }));
-    moved.sort((a, b) => (a.x.updated_at < b.x.updated_at ? 1 : -1));
-    const cpName = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
-    const verb = { in_progress: 'بدأت', done: 'اكتملت', not_started: 'أُعيدت إلى "لم تبدأ"', na: 'لا تنطبق' };
-
-    const list = rows.filter((r) => (!f.gov || r.p.governorate === f.gov) && (!f.brand || (r.p.brand || 'غير محددة') === f.brand) && (!f.st || (f.st === 'late' ? isLate(r) : r.status === f.st)))
-      .sort((a, b) => ({ in_progress: 0, not_started: 1, done: 2 }[a.status] - { in_progress: 0, not_started: 1, done: 2 }[b.status]) || (b.why.length - a.why.length));
-    const projRow = (r) => h('li', null, h('a', { href: '#/project/' + r.p.id, class: 'proj' },
-      h('span', { class: 'pj-main' }, h('b', null, r.p.client),
-        h('small', null, [r.compound ? PTYPES.compound : PTYPES[r.p.project_type], r.p.governorate, r.p.city, r.p.brand].filter(Boolean).join('، '))),
-      h('span', { class: 'pj-now' + (r.status === 'done' ? ' ok' : '') }, r.now, r.due ? h('small', { class: 'pj-due' + (r.sc?.late ? ' late' : '') }, r.due) : null),
-      h('span', { class: 'pj-prog' }, h('span', { class: 'st-bar' }, h('span', { style: { width: (r.pct * 100).toFixed(1) + '%' } })), h('b', null, pctText(r.pct))),
-      h('span', { class: 'pj-flags' }, r.flag ? h('span', { class: 'chip ' + (r.bad ? 'st-has-failure' : 'warn-chip'), title: r.why.join('، ') }, r.flag) : null)));
-
-    // كل رقم يفتح صفحة المشاريع مصفّاة عليه
-    const stat = (l, v, c, st) => h('div', { class: 'st ' + c },
-      h('button', { type: 'button', class: 'st-btn', title: `عرض ${l === 'المشاريع' ? 'كل المشاريع' : 'المشاريع: ' + l}`, onClick: () => openList(st ? { st } : {}) },
-        h('dd', null, num(v)), h('dt', null, l, h('span', { class: 'st-go', 'aria-hidden': 'true' }, ' ←'))));
-
-    return h('div', { class: 'dash2 home' },
-      h('header', { class: 'd2-head' },
-        h('p', { class: 'd2-lead' }, lead),
-        h('div', { class: 'd2-pct' }, h('strong', null, pctText(avg)), h('span', null, 'متوسط إنجاز المشاريع'))),
-      h('dl', { class: 'd2-stats' },
-        stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
-        stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('متأخرة', lateN, lateN ? 'bad' : 'muted', 'late'), stat('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'muted', 'attn')),
-      window.Reports ? window.Reports.homeBox() : null,
-      h('section', { class: 'd2-pipe' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'أين تقف المشاريع'),
-        h('span', { class: 'd2-note' }, 'عدد المشاريع عند كل مرحلة' + (rows.some((r) => r.compound) ? '. المجمّعات تُتابَع وحدةً وحدة في قسمها' : ''))), pipe),
-      h('div', { class: 'd2-two' }, duesBox, crewsBox),
-      h('div', { class: 'd2-grid' },
-        h('section', { class: 'd2-plan' },
-          h('div', { class: 'd2-plan-head' }, h('h2', null, 'المشاريع حسب المحافظة'),
-            h('span', { class: 'd2-note' }, 'اضغط محافظة لعرض مشاريعها' + (noGov ? `. ${num(noGov)} بلا محافظة محددة` : ''))),
-          govMap),
-        h('aside', { class: 'd2-side' },
-          h('section', { class: 'd2-attn' + (attn.length ? ' has' : '') }, h('h2', null, 'مشاريع تحتاج انتباهك'),
-            attn.length ? h('ul', null, attn.slice(0, 12).map((r) => h('li', null, h('a', { href: '#/project/' + r.p.id },
-              h('b', null, r.p.client), h('span', { class: 'why' + (r.bad ? '' : ' alert') }, r.why.join('، ')), h('span', { class: 'nx' }, r.p.governorate || '')))))
-              : h('p', { class: 'calm' }, 'لا مشاكل مفتوحة ولا مشاريع متوقفة.')),
-          h('section', { class: 'd2-brands' }, h('h2', null, 'حسب الماركة'),
-            byBrand.length ? h('ul', { class: 'brand-list' }, byBrand.map((x) => h('li', null,
-              h('button', { type: 'button', onClick: () => openList({ brand: x.b }) },
-                h('b', { dir: 'auto' }, x.b), h('small', null, `${num(x.n)} مشروع`),
-                h('span', { class: 'st-bar' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })), h('span', { class: 'bp' }, pctText(x.pct))))))
-              : h('p', { class: 'calm' }, '—')))),
-      h('section', { class: 'd2-golist' },
-        h('a', { href: '#/projects', class: 'golist', onClick: () => { state._pf = { ...PF_DEFAULT }; } },
-          h('span', null, h('b', null, `كل المشاريع (${num(rows.length)})`), h('small', null, 'بحث وترتيب وتصفية حسب الحالة والمحافظة والماركة والمنفّذ')),
-          h('span', { class: 'gl-go', 'aria-hidden': 'true' }, '←')),
-        isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: newProject }, '+ مشروع جديد') : null),
-      h('section', { class: 'd2-today' }, h('h2', null, 'نشاط اليوم'),
-        moved.length ? h('ol', { class: 'today-list' }, moved.slice(0, 15).map(({ p, x }) => h('li', { class: x.status === 'done' ? 'act-done' : '' },
-          h('time', { dir: 'ltr' }, new Date(x.updated_at).toTimeString().slice(0, 5)),
-          h('a', { href: '#/project/' + p.id }, h('b', null, p.client)),
-          h('span', null, `${verb[x.status]} مرحلة ${cpName[x.checkpoint]}`),
-          h('small', null, x.crew ? `${num(x.crew)} كادر` : ''))))
-          : h('p', { class: 'calm muted' }, 'لم تتحرّك أي مرحلة اليوم بعد.'),
-        rows.some((r) => r.compound) ? h('div', null, h('h3', { class: 'd2-sub' }, 'فحوصات المجمّعات اليوم'), todayActivity(state.projects.filter(isCompound).map((p) => p.id))) : null));
-  }
-
   /* ---------- صفحة المشاريع: جدول ببحث وترتيب وتصفية ---------- */
   const PF_DEFAULT = { q: '', st: '', gov: '', brand: '', type: '', crew: '', sort: 'status', dir: 1 };
   // توحيد الحروف للبحث: أ إ آ ← ا، ة ← ه، ى ← ي، وحذف التشكيل والتطويل
@@ -941,7 +798,9 @@
         const p = r.p;
         const go2 = () => go('project/' + p.id);
         return h('tr', { class: 'pl-row' + (r.sc?.late ? ' late' : '') },
-          h('td', { class: 'c-name' }, h('a', { href: '#/project/' + p.id }, h('b', null, mark(p.client))),
+          h('td', { class: 'c-name' }, h('a', { href: '#/project/' + p.id, class: 'pl-link' },
+            h('span', { class: 'st-ring xs ' + (r.sc?.late || r.bad ? 'bad' : r.why.length ? 'warn' : r.status), style: ringStyle(r.pct), 'aria-hidden': 'true' }, h('span', { class: 'st-face' }, h('b', null, initials(p.client)))),
+            h('b', null, mark(p.client))),
             h('small', null, [r.compound ? PTYPES.compound : PTYPES[p.project_type], p.brand].filter(Boolean).join(' · '))),
           h('td', { class: 'c-cust', 'data-l': 'العميل' }, p.customer_name ? [mark(p.customer_name), p.customer_phone ? h('small', { dir: 'ltr' }, p.customer_phone) : null] : h('span', { class: 'muted' }, '—')),
           h('td', { class: 'c-gov', 'data-l': 'المحافظة' }, p.governorate ? [p.governorate, p.city ? h('small', null, p.city) : null] : h('span', { class: 'muted' }, '—')),
@@ -1107,7 +966,7 @@
       sheets.push({ name: 'الفرق والمقاولون', rows: crewRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:O${crewRows.length}`, widths: [26, 14, 20, 15, 24, 7, 12, 12, 9, 16, 20, 40, 14, 13, 15] } });
 
       download(X.writeWorkbook(sheets), `sorror-projects-${today}.xlsx`);
-      toast(`تم تنزيل ${list.length === all.length ? 'كل المشاريع' : `${list.length} من ${all.length} مشروع`}`);
+      toast(`تم تنزيل ${list.length === all.length ? 'كل المشاريع' : `${num(list.length)} من ${cntAr(all.length, 'مشروع واحد', 'مشروعين', 'مشاريع', 'مشروعاً')}`}`);
     } catch (e) { fail(e); }
     finally { if (btn) btn.disabled = false; }
   }
@@ -1118,7 +977,7 @@
     const target = rows.length === 1 ? rows[0] : rows.filter(has).length === 1 ? rows.filter(has)[0] : null;
     if (st && target) {
       if (st === 'ncr') { state._nf = { status: 'open' }; return go(`project/${target.p.id}/ncr`); }
-      state._tf = { q: '', zone: '', crew: '', status: st === 'all' ? '' : st, next: '', sort: 'code' };
+      (state._tfBy ||= {})[target.p.id] = { q: '', zone: '', crew: '', status: st === 'all' ? '' : st, next: '', sort: 'code' };
       return go(`project/${target.p.id}/tracker`);
     }
     state._pf = { ...PF_DEFAULT, type: 'compound', st: ['Has failure', 'alert', 'ncr'].includes(st) ? 'attn' : '' };
@@ -1679,7 +1538,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, MAP_URL, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, MAP_URL, initials, ringStyle, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => { pullToRefresh(); sheetDrag(); boot().catch(fail); });

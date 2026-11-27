@@ -106,8 +106,8 @@
       p.due_date ? ['التسليم', h('span', null, h('span', { dir: 'ltr' }, p.due_date), ' ', h('b', { class: 'due-tag' + (sc.late ? ' late' : sc.behind ? ' behind' : '') }, A.dueText(sc, sp.status)))] : null
     ].filter(Boolean);
     if (!items.length) return A.isStaff() ? h('p', { class: 'client-empty muted small' }, 'لا توجد بيانات عميل أو مواعيد. ', h('a', { href: `#/project/${p.id}/settings` }, 'أضفها من "بيانات المشروع"')) : null;
-    return h('section', { class: 'client-card' }, h('dl', null, items.map(([k, v]) => h('div', null, h('dt', null, k), h('dd', null, v)))),
-      sc.behind ? h('p', { class: 'behind-note' }, `متأخر عن الجدول: الإنجاز ${A.pctText(sp.pct)} والمتوقع حسب الوقت المنقضي ${A.pctText(sc.expected)}.`) : null);
+    return h('details', { class: 'client-card fc' }, h('summary', null, 'تفاصيل العميل والعقد'),
+      h('dl', null, items.map(([k, v]) => h('div', null, h('dt', null, k), h('dd', null, v)))));
   }
 
   async function saveStage(p, key, patch) {
@@ -118,18 +118,42 @@
     return r.data;
   }
 
+  // رأس المشروع مثل صفحة الحساب: حلقة الإنجاز، الاسم، وأزرار الاتصال والخريطة
+  function projectHead(p, sp) {
+    const sc = A.schedule(p, sp.pct, sp.status);
+    const meta = [A.PTYPES[p.project_type], p.governorate, p.city, p.brand].filter(Boolean).join(' · ');
+    const cur = sp.status !== 'done' ? sp.cur : null;
+    const crew = cur?.s.crew_id ? A.crewOf(cur.s.crew_id) : null;
+    const tel = (x) => 'tel:' + String(x).replace(/[^0-9+]/g, '');
+    const safeMap = p.map_url && A.MAP_URL.test(p.map_url) ? p.map_url : null;
+    const idle = sp.status === 'in_progress' && sp.last ? daysAgo(sp.last.slice(0, 10)) : 0;
+    const why = [sc.late ? `فات موعد التسليم بـ${A.daysAr(-sc.daysLeft)}` : '', !sc.late && sc.behind ? ['متأخر عن الجدول: أُنجز ', A.pctText(sp.pct), ' والمتوقع ', A.pctText(sc.expected)] : '',
+      idle >= 14 && cur ? `المرحلة الحالية "${cur.c.name_ar}" لم تتحرك منذ ${A.daysAr(idle)}` : ''].filter((x) => x && x.length);
+    return h('header', { class: 'phead' + (sc.late ? ' bad' : why.length ? ' warn' : '') },
+      h('a', { href: '#/projects', class: 'phead-back', 'aria-label': 'رجوع إلى كل المشاريع' }, '→'),
+      h('div', { class: 'phead-top' },
+        h('span', { class: 'st-ring lg', style: A.ringStyle(sp.pct) }, h('span', { class: 'st-face' }, h('b', null, A.pctText(sp.pct)), h('small', null, `${num(sp.done)} من ${num(sp.total)}`))),
+        h('div', { class: 'phead-t' }, h('h1', null, p.client), meta ? h('p', null, meta) : null,
+          p.customer_name ? h('p', { class: 'phead-cust' }, 'العميل: ', p.customer_name) : null)),
+      why.length ? h('div', { class: 'phead-why', role: 'status' }, why.map((w) => h('p', null, w))) : null,
+      h('div', { class: 'phead-acts' },
+        crew?.phone ? h('a', { href: tel(crew.phone), class: 'pill-btn' }, '📞 ', crew.name) : null,
+        p.customer_phone ? h('a', { href: tel(p.customer_phone), class: 'pill-btn' }, '📞 العميل') : null,
+        safeMap ? h('a', { href: safeMap, target: '_blank', rel: 'noopener noreferrer', class: 'pill-btn' }, '🗺️ الموقع') : null,
+        p.due_date ? h('span', { class: 'pill-btn due ' + (sc.late ? 'bad' : sc.behind ? 'warn' : '') }, '📅 ', A.dueText(sc, sp.status)) : null));
+  }
+
   function stagesProject(p, r) {
     const tab = r.tab === 'settings' ? 'settings' : 'stages';
-    const meta = [A.PTYPES[p.project_type], p.governorate, p.city, p.brand].filter(Boolean).join('، ');
+    const sp = A.stageProgress(p);
     return h('div', { class: 'book stages-book' },
-      h('div', { class: 'book-head' },
-        h('div', null, h('a', { href: '#/projects', class: 'link small back' }, '→ كل المشاريع'), h('h1', null, p.client),
-          meta ? h('p', { class: 'muted small' }, meta) : null)),
-      h('nav', { class: 'sheet-tabs', 'aria-label': 'أقسام المشروع' },
+      projectHead(p, sp),
+      h('nav', { class: 'seg-tabs', 'aria-label': 'أقسام المشروع' },
         [['stages', 'مراحل العمل'], ['settings', 'بيانات المشروع']].map(([k, l]) =>
-          h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null }, l))),
-      tab === 'settings' ? null : clientCard(p, A.stageProgress(p)),
-      h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : stagesSheet(p)));
+          h('a', { href: `#/project/${p.id}/${k}`, class: k === tab ? 'on' : '', 'aria-current': k === tab ? 'page' : null }, l))),
+      h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : stagesSheet(p)),
+      // تفاصيل العميل والعقد مطوية تحت المراحل، حتى تبقى "المرحلة الحالية" أول ما يُرى
+      tab === 'settings' ? null : clientCard(p, sp));
   }
 
   function stagesSheet(p) {
@@ -347,7 +371,7 @@
         if (r.error || !r.data) return A.fail(r.error || 'permission denied');
         Object.assign(p, r.data); toast('تم حفظ بيانات المشروع'); A.render();
       } }, 'حفظ بيانات المشروع')),
-      A.isAdmin() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn danger sm', onClick: del }, 'حذف المشروع')) : null);
+      A.isAdmin() ? h('div', { class: 'danger-zone' }, h('b', null, 'منطقة الخطر'), h('p', { class: 'muted small' }, 'حذف المشروع يحذف مراحله وكل بياناته نهائياً، ولا يمكن التراجع.'), h('button', { type: 'button', class: 'btn danger-outline sm', onClick: del }, 'حذف المشروع')) : null);
   }
 
   // أزرار المشروع: صف على الكمبيوتر، وقائمة "المزيد" على الجوال
@@ -382,7 +406,7 @@
       P[k].forEach((d) => { const path = document.createElementNS(NS, 'path'); path.setAttribute('d', d); svg.appendChild(path); });
       return svg;
     };
-    const short = { dashboard: 'اللوحة', tracker: `${W.theMany}`, tests: 'الفحوصات', ncr: 'NCR', guide: 'المساعدة' };
+    const short = { dashboard: 'الملخّص', tracker: `${W.theMany}`, tests: 'الفحوصات', ncr: 'المخالفات', guide: 'المساعدة' };
     const d = S.data[p.id];
     const open = d ? d.ncrs.filter((n) => n.status === 'open').length : 0;
     return h('nav', { class: 'bottom-nav', 'aria-label': 'التنقل' }, SHEETS.map(([k, ar]) =>
@@ -443,7 +467,7 @@
       ].map(([l, v, c, st]) => h('div', { class: 'st ' + c },
         h('button', { type: 'button', class: 'st-btn', title: st === 'ncr' ? 'عرض NCR المفتوحة' : `عرض ${W.theMany}: ${l}`, onClick: () => {
           if (st === 'ncr') { S._nf = { status: 'open' }; A.go(`project/${p.id}/ncr`); return; }
-          S._tf = { q: '', zone: '', crew: '', status: st, next: '', sort: 'code' };
+          (S._tfBy ||= {})[p.id] = { q: '', zone: '', crew: '', status: st, next: '', sort: 'code' };
           A.go(`project/${p.id}/tracker`);
         } }, h('dd', null, num(v)), h('dt', null, l, h('span', { class: 'st-go', 'aria-hidden': 'true' }, ' ←')))))),
       h('div', { class: 'd2-grid' },
@@ -456,7 +480,7 @@
             h('div', { class: 'ramp', 'aria-hidden': 'true' }, BANDS.map(([c]) => h('i', { class: 'tile ' + c }))),
             h('div', { class: 'ramp-labels' }, h('span', null, 'لم تبدأ'), h('span', null, 'مكتملة')),
             h('div', { class: 'flags' },
-              h('span', null, h('i', { class: 'tile b1 flag-fail' }), 'بند فاشل أو NCR مفتوحة'),
+              h('span', null, h('i', { class: 'tile b1 flag-fail' }), 'فحص فاشل أو عدم مطابقة مفتوحة'),
               h('span', null, h('i', { class: 'tile b1 flag-alert' }), 'تنبيه تسلسل')))),
         h('aside', { class: 'd2-side' },
           h('section', { class: 'd2-attn' + (attn.length ? ' has' : '') },
@@ -506,7 +530,8 @@
      ========================================================== */
   function sheetTracker(p, d) {
     const cps = S.checkpoints;
-    const f = S._tf || (S._tf = { q: '', zone: '', crew: '', status: '', next: '', sort: mobile() ? 'priority' : 'code' });
+    // التصفية لكل مجمّع على حدة (لا تنتقل من مجمّع لآخر)
+    const f = (S._tfBy ||= {})[p.id] || (S._tfBy[p.id] = { q: '', zone: '', crew: '', status: '', next: '', sort: mobile() ? 'priority' : 'code' });
     // الأولوية: مشكلة ← جارية ← لم تبدأ ← مكتملة
     const rank = (k) => (k.R || k.W || k.T ? 0 : k.U === 'In progress' ? 1 : k.U === 'Not started' ? 2 : 3);
     const zones = [...new Set(d.units.map((u) => u.zone).filter(Boolean))].sort();
@@ -590,7 +615,7 @@
   function villaCards(p, list) {
     let lastGroup = null;
     const groupName = (k) => (k.R || k.W || k.T ? 'تحتاج انتباهاً' : k.U === 'In progress' ? 'جارية' : k.U === 'Not started' ? 'لم تبدأ' : 'مكتملة');
-    const sorted = (S._tf || {}).sort === 'priority';
+    const sorted = ((S._tfBy || {})[p.id] || {}).sort === 'priority';
     const out = [];
     list.forEach(({ u, k }) => {
       const g = groupName(k);
@@ -682,7 +707,9 @@
         h('div', { class: 'quick-btns' },
           h('button', { type: 'button', class: 'btn big pass', onClick: async () => { if (await saveResult(u, k.V, 'pass')) { toast(`${u.code} · ${k.V.name_ar}: ناجح`); A.render(); } } }, '✓ ناجح'),
           h('button', { type: 'button', class: 'btn big fail', onClick: async () => { if (await saveResult(u, k.V, 'fail')) { toast(`${u.code} · ${k.V.name_ar}: فاشل. أضف NCR`, 'error'); A.render(); } } }, '✗ فاشل'))) : null,
-      h('section', { class: 'panel' }, h('h2', null, 'نقاط الفحص'),
+      // الفني: القراءات أولاً (هي عمله)، ونقاط الفحص مطوية؛ المشرف: نقاط الفحص أولاً
+      ...(() => {
+        const cpsSec = h('section', { class: 'panel' }, h('h2', null, 'نقاط الفحص'),
         (() => {
           const row = (cp) => {
             const v = r(cp.key);
@@ -703,15 +730,20 @@
               h('ol', { class: 'cp-list' }, done.map(row))) : null,
             h('ol', { class: 'cp-list' }, rest.map(row))
           ];
-        })()),
-      h('section', { class: 'panel' },
+        })());
+        const rdSec = h('section', { class: 'panel' },
         h('div', { class: 'row between' }, h('h2', null, 'القراءات'), h('button', { type: 'button', class: 'btn sm primary', onClick: () => testForm(p, d, u) }, blank(t.unit_id) ? 'تسجيل قراءات' : 'تعديل القراءات')),
         blank(t.unit_id) ? h('p', { class: 'muted' }, 'لا توجد قراءات بعد.') : h('div', { class: 'rds' },
           reading('هبوط الضغط MPa', c.H, c.I), reading('الفاكيوم (مايكرون)', t.vacuum_microns, c.N),
-          reading('فرق الشحن', c.R === '' ? '' : A.pctText(c.R), c.S), reading('الفاحص', t.inspector))),
+          reading('فرق الشحن', c.R === '' ? '' : A.pctText(c.R), c.S), reading('الفاحص', t.inspector)));
+        if (staff) return [cpsSec, rdSec];
+        const passN = cps.filter((cp) => r(cp.key) === 'pass').length, openN = cps.filter((cp) => r(cp.key) === 'pending').length;
+        return [rdSec, h('p', { class: 'muted small tech-note' }, 'اعتماد النتائج للمشرف. سجّل القراءات وسيراجعها.'),
+          h('details', { class: 'panel tech-cps' }, h('summary', null, `نقاط الفحص: ${num(passN)} ناجحة، ${num(openN)} لم تُفحص`), cpsSec)];
+      })(),
       h('section', { class: 'panel' },
         h('div', { class: 'row between' }, h('h2', null, `عدم المطابقة (${ncrs.length})`),
-          staff ? h('button', { type: 'button', class: 'btn sm', onClick: () => ncrForm(p, d, null, u, k.V === '-' ? null : k.V.key) }, '+ NCR') : null),
+          staff ? h('button', { type: 'button', class: 'btn sm', onClick: () => ncrForm(p, d, null, u, k.V === '-' ? null : k.V.key) }, '+ عدم مطابقة') : null),
         ncrs.length ? h('ul', { class: 'ncr-mini' }, ncrs.map((n) => h('li', null,
           h('span', { class: 'chip ' + (n.status === 'open' ? 'st-has-failure' : 'st-complete') }, n.status === 'open' ? 'مفتوحة' : 'مغلقة'),
           h('b', null, n.ncr_no), ' ', S.checkpoints.find((x) => x.key === n.checkpoint)?.name_ar, ': ', n.description,
@@ -974,7 +1006,7 @@
           h('option', { value: 'closed', selected: f.status === 'closed' }, `المغلقة (${d.ncrs.length - open})`),
           h('option', { value: '', selected: !f.status }, `الكل (${d.ncrs.length})`)),
         overdue ? h('span', { class: 'chip st-has-failure' }, `${overdue} متأخرة عن موعدها`) : null,
-        staff && d.units.length ? h('button', { type: 'button', class: 'btn primary sm', onClick: () => ncrForm(p, d, null) }, '+ NCR جديدة') : null),
+        staff && d.units.length ? h('button', { type: 'button', class: 'btn primary sm', onClick: () => ncrForm(p, d, null) }, '+ حالة عدم مطابقة') : null),
       h('p', { class: 'muted small' }, `سطر لكل فشل. "مفتوحة" تُحسب على ${W.the} في متابعة ${W.theMany}. أغلقها فقط بعد إعادة الفحص والتأكد من الإصلاح.` + (staff ? ' اضغط أي سطر لتعديله.' : '')),
       h('div', { class: 'xl-wrap' }, h('table', { class: 'xl ncr' },
         h('thead', null, h('tr', null, ['الرقم', 'تاريخ الفتح', `${W.the}`, 'نقطة الفحص', 'الوصف', 'المسؤول', 'الموعد', 'الحالة', 'تاريخ الإغلاق'].map((x) => h('th', null, x)))),
@@ -1031,7 +1063,7 @@
             Object.assign(p, r.data); toast('تم حفظ بيانات المشروع'); A.render();
           } }, 'حفظ بيانات المشروع')));
         })(),
-        A.isAdmin() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn danger sm', onClick: del }, 'حذف المشروع')) : null) : null);
+        A.isAdmin() ? h('div', { class: 'danger-zone' }, h('b', null, 'منطقة الخطر'), h('p', { class: 'muted small' }, 'حذف المشروع يحذف مراحله وكل بياناته نهائياً، ولا يمكن التراجع.'), h('button', { type: 'button', class: 'btn danger-outline sm', onClick: del }, 'حذف المشروع')) : null) : null);
   }
 
   /* ==========================================================
