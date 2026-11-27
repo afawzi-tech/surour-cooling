@@ -37,12 +37,12 @@
   const RES_AR = { pass: 'ناجح', fail: 'فاشل', pending: 'معلّق', na: 'لا ينطبق' };
   const STATUS_AR = { 'Complete': 'مكتملة', 'In progress': 'جارية', 'Not started': 'لم تبدأ', 'Has failure': 'بها فشل' };
   const TABLES = { profiles: 'المستخدمون', projects: 'المشاريع', units: 'Villa Tracker', unit_checks: 'Villa Tracker',
-    test_records: 'Test Records', ncrs: 'NCR Register', materials: 'المواد', project_stages: 'مراحل العمل' };
+    test_records: 'Test Records', ncrs: 'NCR Register', materials: 'المواد', project_stages: 'مراحل العمل', crews: 'الفرق' };
   const ACTIONS = { INSERT: 'إضافة', UPDATE: 'تعديل', DELETE: 'حذف' };
 
   const state = {
     sb: null, user: null, profile: null,
-    projects: [], checkpoints: [],
+    projects: [], checkpoints: [], crews: [],
     stages: {},       // لكل مشروع: { checkpoint: صف المرحلة }
     data: {}          // لكل مشروع: { units, tests: Map(unit_id), ncrs }
   };
@@ -137,14 +137,17 @@
   }
 
   async function loadBase() {
-    const [projects, cps, stages] = await Promise.all([
+    const [projects, cps, stages, crews] = await Promise.all([
       state.sb.from('projects').select('*').order('created_at'),
       state.sb.from('qc_checkpoints').select('*').order('position'),
-      fetchAll((a, b) => state.sb.from('project_stages').select('*').range(a, b))]);
+      fetchAll((a, b) => state.sb.from('project_stages').select('*').range(a, b)),
+      state.sb.from('crews').select('*').order('name')]);
     if (projects.error) throw projects.error;
     if (cps.error) throw cps.error;
     state.projects = projects.data;
     state.checkpoints = cps.data;
+    if (crews.error) throw crews.error;
+    state.crews = crews.data;
     state.stages = {};
     stages.forEach((x) => { (state.stages[x.project_id] ||= {})[x.checkpoint] = x; });
   }
@@ -162,6 +165,32 @@
     const last = list.map((x) => x.s.updated_at).filter(Boolean).sort().pop() || null;
     return { list, done, total: active.length, pct: active.length ? done / active.length : 0, cur, status, last };
   }
+
+  /* ---------- المواعيد ----------
+     متأخر: فات تاريخ التسليم والمشروع لم يكتمل.
+     متأخر عن الجدول: الإنجاز أقل من نسبة الوقت المنقضي (من البدء إلى التسليم) بـ15 نقطة أو أكثر. */
+  const BEHIND_GAP = 0.15;
+  const todayStr = () => new Date().toISOString().slice(0, 10);
+  const dayDiff = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);
+  function schedule(p, pct, status) {
+    const t = todayStr();
+    if (!p.due_date) return { has: false };
+    const daysLeft = dayDiff(p.due_date, t);
+    const late = status !== 'done' && daysLeft < 0;
+    let expected = null;
+    if (p.start_date && p.due_date > p.start_date) expected = Math.min(1, Math.max(0, dayDiff(t, p.start_date) / dayDiff(p.due_date, p.start_date)));
+    const behind = !late && status !== 'done' && expected !== null && expected - pct >= BEHIND_GAP;
+    return { has: true, due: p.due_date, daysLeft, late, expected, behind };
+  }
+  const daysAr = (n) => (n === 1 ? 'يوم' : n === 2 ? 'يومين' : n <= 10 ? `${num(n)} أيام` : `${num(n)} يوماً`);
+  function dueText(sc, status) {
+    if (!sc.has) return '';
+    if (status === 'done') return `التسليم ${sc.due}`;
+    if (sc.late) return `متأخر ${daysAr(-sc.daysLeft)}`;
+    if (sc.daysLeft === 0) return 'التسليم اليوم';
+    return `التسليم بعد ${daysAr(sc.daysLeft)}`;
+  }
+  const crewOf = (id) => state.crews.find((c) => c.id === id) || null;
 
   async function loadProject(id, force = false) {
     if (state.data[id] && !force) return state.data[id];
@@ -235,6 +264,7 @@
   const ICONS = {
     home: ['M3 11l9-7 9 7', 'M5 10v10h14V10', 'M10 20v-6h4v6'],
     compounds: ['M3 3h7v7H3z', 'M14 3h7v7h-7z', 'M3 14h7v7H3z', 'M14 14h7v7h-7z'],
+    crews: ['M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M16 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6z', 'M2 20c0-4 2.5-7 6-7s6 3 6 7', 'M14 13.5c.6-.3 1.3-.5 2-.5 3.5 0 6 3 6 7'],
     users: ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M2 21c0-4 3-6 7-6s7 2 7 6', 'M17 4a3.5 3.5 0 0 1 0 7', 'M19 15c2 .6 3 2.5 3 6'],
     audit: ['M4 4h16v16H4z', 'M8 9h8', 'M8 13h8', 'M8 17h5'],
     backup: ['M12 3v12', 'M7 10l5 5 5-5', 'M4 19h16'],
@@ -253,6 +283,7 @@
     const menu = [
       ['home', 'المشاريع', true],
       ['compounds', 'المجمّعات السكنية', true],
+      ['crews', 'الفرق', true],
       ['users', 'المستخدمون', isAdmin()],
       ['audit', 'سجل العمليات', isAdmin()],
       ['backup', 'نسخة احتياطية', isStaff()]
@@ -264,8 +295,8 @@
       h('div', { class: 'row' },
         h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, 'aria-label': 'تبديل المظهر' }, 'المظهر'),
         h('button', { class: 'btn ghost sm', type: 'button', onClick: signOut }, 'خروج')));
-    // الهاتف: المشاريع والمجمّعات، والباقي تحت "المزيد"
-    const rest = menu.slice(2);
+    // الهاتف: المشاريع والمجمّعات والفرق، والباقي مع الخروج تحت "المزيد"
+    const rest = menu.slice(3);
     const more = h('details', { class: 'mb-more' },
       h('summary', { class: rest.some(([k]) => k === navOn) ? 'on' : '' }, icon('more'), h('span', null, 'المزيد')),
       h('div', { class: 'mb-sheet' }, rest.map(link), me.cloneNode(true)));
@@ -280,7 +311,7 @@
         me),
       h('header', { class: 'mtop' }, h('a', { href: '#/home', onClick: stay('home') }, logo()), p ? h('span', { class: 'mtop-crumb' }, p.client) : null),
       // في صفحات المجمّع يظهر شريط المجمّع السفلي بدل هذا
-      p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 2).map(link), rest.length ? more : null)
+      p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 3).map(link), more)
     ];
   }
 
@@ -384,15 +415,20 @@
       const late = d.ncrs.filter((n) => n.status === 'open' && n.due_date && n.due_date < today).length;
       const status = D.B3 && D.B4 === D.B3 ? 'done' : D.B6 === D.B3 ? 'not_started' : 'in_progress';
       const why = [fails ? `${num(fails)} وحدة فيها فشل` : '', D.B8 ? `${num(D.B8)} تنبيه تسلسل` : '', D.B9 ? `${num(D.B9)} NCR مفتوحة` : '', late ? `${num(late)} متأخرة` : ''].filter(Boolean);
-      return { p, pct: D.B10, status, why, bad: !!(fails || D.B9), compound: true,
+      const sc = schedule(p, D.B10, status);
+      if (sc.late) why.unshift(`متأخر ${daysAr(-sc.daysLeft)} عن التسليم`); else if (sc.behind) why.unshift('متأخر عن الجدول');
+      return { p, pct: D.B10, status, why, flag: why[0] || '', bad: !!(fails || D.B9 || sc.late), compound: true, sc, due: dueText(sc, status),
         now: `${num(D.B3)} ${unitWords(p).one}، مكتملة ${num(D.B4)}، جارية ${num(D.B5)}`, curKey: null };
     }
     const sp = stageProgress(p);
     const idle = sp.status === 'in_progress' ? daysSince(sp.last) : null;
-    const why = idle !== null && idle >= STALL_DAYS ? [`لم تتحرك منذ ${num(idle)} يوماً`] : [];
+    const sc = schedule(p, sp.pct, sp.status);
+    const why = [sc.late ? `متأخر ${daysAr(-sc.daysLeft)} عن التسليم` : '', sc.behind ? `متأخر عن الجدول (الإنجاز ${pctText(sp.pct)} والمتوقع ${pctText(sc.expected)})` : '',
+      idle !== null && idle >= STALL_DAYS ? `لم يتحرك منذ ${daysAr(idle)}` : ''].filter(Boolean);
     const now = sp.status === 'done' ? 'اكتملت كل المراحل' : sp.cur
       ? `${sp.cur.s.status === 'in_progress' ? 'الآن' : 'التالية'}: ${sp.cur.c.name_ar} (${num(sp.cur.c.position)} من ${num(state.checkpoints.length)})` : '—';
-    return { p, pct: sp.pct, status: sp.status, why, bad: false, compound: false, now, curKey: sp.status === 'done' ? null : sp.cur?.c.key, sp };
+    const flag = sc.late ? `متأخر ${daysAr(-sc.daysLeft)}` : sc.behind ? 'متأخر عن الجدول' : why.length ? 'متوقف' : '';
+    return { p, pct: sp.pct, status: sp.status, why, flag, bad: sc.late, compound: false, now, curKey: sp.status === 'done' ? null : sp.cur?.c.key, sp, sc, due: dueText(sc, sp.status) };
   }
 
   async function home() {
@@ -403,11 +439,44 @@
     const attn = rows.filter((r) => r.why.length).sort((a, b) => (b.bad - a.bad) || (b.why.length - a.why.length));
     const avg = rows.length ? rows.reduce((a, r) => a + r.pct, 0) / rows.length : 0;
     const govs = new Set(rows.map((r) => r.p.governorate).filter(Boolean)).size;
-    const STL = { not_started: 'لم يبدأ', in_progress: 'جارٍ', done: 'مكتمل' };
+    const STL = { not_started: 'لم يبدأ', in_progress: 'جارٍ', done: 'مكتمل', late: 'متأخر' };
+    const isLate = (r) => !!(r.sc && (r.sc.late || r.sc.behind));
+    const lateN = rows.filter(isLate).length;
+
+    // المواعيد القادمة: المشاريع غير المكتملة بتاريخ تسليم، الأقرب أولاً
+    const dues = rows.filter((r) => r.sc?.has && r.status !== 'done').sort((a, b) => a.sc.daysLeft - b.sc.daysLeft);
+    const duesBox = h('section', { class: 'd2-dues' }, h('h2', null, 'المواعيد القادمة'),
+      dues.length ? h('ol', { class: 'due-list' }, dues.slice(0, 8).map((r) => h('li', { class: r.sc.late ? 'late' : r.sc.behind ? 'behind' : '' },
+        h('a', { href: '#/project/' + r.p.id }, h('b', null, r.p.client), h('small', null, `التسليم ${r.sc.due}`)),
+        h('span', { class: 'due-when' }, r.due),
+        h('span', { class: 'due-bar', title: r.sc.expected !== null ? `الإنجاز ${pctText(r.pct)}، المتوقع حسب الوقت ${pctText(r.sc.expected)}` : `الإنجاز ${pctText(r.pct)}` },
+          h('span', { class: 'db-fill', style: { width: (r.pct * 100).toFixed(1) + '%' } }),
+          r.sc.expected !== null ? h('i', { class: 'db-exp', style: { 'inset-inline-start': (r.sc.expected * 100).toFixed(1) + '%' } }) : null))))
+        : h('p', { class: 'calm muted' }, 'لا توجد مشاريع بتاريخ تسليم. أضف التاريخ من "بيانات المشروع".'),
+      dues.some((r) => r.sc.expected !== null) ? h('p', { class: 'd2-note' }, 'الشريط = الإنجاز، والخط العمودي = المتوقع حسب الوقت المنقضي.') : null);
+
+    // الفرق: أين تعمل كل فرقة الآن (المراحل الجارية المسندة لها)
+    const working = [];
+    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.status === 'in_progress') working.push({ p, x }); }));
+    const cpN = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
+    const crews = state.crews.filter((c) => c.active);
+    const people = working.reduce((a, w) => a + (w.x.crew || 0), 0);
+    const busy = crews.filter((c) => working.some((w) => w.x.crew_id === c.id));
+    const crewsBox = h('section', { class: 'd2-crews' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'الفرق'),
+      h('a', { href: '#/crews', class: 'link small' }, isStaff() ? 'إدارة الفرق' : 'كل الفرق')),
+      crews.length ? [h('p', { class: 'd2-note' }, `${num(busy.length)} تعمل، ${num(crews.length - busy.length)} متاحة` + (people ? `. ${num(people)} كادر في المراحل الجارية` : '')),
+        h('ul', { class: 'crew-list' }, [...busy, ...crews.filter((c) => !busy.includes(c))].map((c) => {
+          const at = working.filter((w) => w.x.crew_id === c.id);
+          return h('li', { class: at.length ? 'busy' : 'free' },
+            h('span', { class: 'cr-name' }, h('b', null, c.name), c.leader ? h('small', null, 'الرئيس: ' + c.leader) : null),
+            h('span', { class: 'cr-where' }, at.length ? at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)) : 'متاحة'),
+            c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone, dir: 'ltr' }, c.phone) : null);
+        }))]
+        : h('p', { class: 'calm muted' }, isStaff() ? 'لا توجد فرق بعد. أضفها من "إدارة الفرق".' : 'لا توجد فرق بعد.'));
 
     const lead = !rows.length ? 'لا توجد مشاريع بعد. أنشئ أول مشروع لتبدأ المتابعة.'
       : cntAr(rows.length, 'مشروع واحد', 'مشروعان', 'مشاريع', 'مشروعاً') + (govs ? ` في ${cntAr(govs, 'محافظة واحدة', 'محافظتين', 'محافظات', 'محافظة')}` : '')
-        + `: ${num(by('in_progress'))} جارٍ و${num(by('done'))} مكتمل. `
+        + `: ${num(by('in_progress'))} جارٍ و${num(by('done'))} مكتمل` + (rows.some(isLate) ? `، منها ${num(rows.filter(isLate).length)} ${rows.filter(isLate).length === 1 ? 'متأخر' : 'متأخرة'} عن موعده. ` : '. ')
         + (attn.length ? (attn.length === 1 ? 'مشروع واحد يحتاج انتباهك.' : `${num(attn.length)} مشاريع تحتاج انتباهك.`) : 'لا شيء يحتاج انتباهك الآن.');
 
     // خريطة المحافظات: متوسط إنجاز مشاريع كل محافظة
@@ -448,14 +517,14 @@
     const cpName = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
     const verb = { in_progress: 'بدأت', done: 'اكتملت', not_started: 'أُعيدت إلى "لم تبدأ"', na: 'لا تنطبق' };
 
-    const list = rows.filter((r) => (!f.gov || r.p.governorate === f.gov) && (!f.brand || (r.p.brand || 'غير محددة') === f.brand) && (!f.st || r.status === f.st))
+    const list = rows.filter((r) => (!f.gov || r.p.governorate === f.gov) && (!f.brand || (r.p.brand || 'غير محددة') === f.brand) && (!f.st || (f.st === 'late' ? isLate(r) : r.status === f.st)))
       .sort((a, b) => ({ in_progress: 0, not_started: 1, done: 2 }[a.status] - { in_progress: 0, not_started: 1, done: 2 }[b.status]) || (b.why.length - a.why.length));
     const projRow = (r) => h('li', null, h('a', { href: '#/project/' + r.p.id, class: 'proj' },
       h('span', { class: 'pj-main' }, h('b', null, r.p.client),
         h('small', null, [r.compound ? PTYPES.compound : PTYPES[r.p.project_type], r.p.governorate, r.p.city, r.p.brand].filter(Boolean).join('، '))),
-      h('span', { class: 'pj-now' + (r.status === 'done' ? ' ok' : '') }, r.now),
+      h('span', { class: 'pj-now' + (r.status === 'done' ? ' ok' : '') }, r.now, r.due ? h('small', { class: 'pj-due' + (r.sc?.late ? ' late' : '') }, r.due) : null),
       h('span', { class: 'pj-prog' }, h('span', { class: 'st-bar' }, h('span', { style: { width: (r.pct * 100).toFixed(1) + '%' } })), h('b', null, pctText(r.pct))),
-      h('span', { class: 'pj-flags' }, r.why.length ? h('span', { class: 'chip ' + (r.bad ? 'st-has-failure' : 'alert') }, r.why[0]) : null)));
+      h('span', { class: 'pj-flags' }, r.flag ? h('span', { class: 'chip ' + (r.bad ? 'st-has-failure' : 'warn-chip'), title: r.why.join('، ') }, r.flag) : null)));
 
     const stat = (l, v, c, st) => h('div', { class: 'st ' + c + (st && f.st === st ? ' sel' : '') },
       st ? h('button', { type: 'button', class: 'st-btn', 'aria-pressed': String(f.st === st), onClick: () => { f.st = f.st === st ? '' : st; render(); } }, h('dd', null, num(v)), h('dt', null, l))
@@ -467,9 +536,10 @@
         h('div', { class: 'd2-pct' }, h('strong', null, pctText(avg)), h('span', null, 'متوسط إنجاز المشاريع'))),
       h('dl', { class: 'd2-stats' },
         stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
-        stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('تحتاج انتباهك', attn.length, attn.length ? 'bad' : 'muted')),
+        stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('متأخرة', lateN, lateN ? 'bad' : 'muted', 'late'), stat('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'muted')),
       h('section', { class: 'd2-pipe' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'أين تقف المشاريع'),
         h('span', { class: 'd2-note' }, 'عدد المشاريع عند كل مرحلة' + (rows.some((r) => r.compound) ? '. المجمّعات تُتابَع وحدةً وحدة في قسمها' : ''))), pipe),
+      h('div', { class: 'd2-two' }, duesBox, crewsBox),
       h('div', { class: 'd2-grid' },
         h('section', { class: 'd2-plan' },
           h('div', { class: 'd2-plan-head' }, h('h2', null, 'المشاريع حسب المحافظة'),
@@ -683,15 +753,38 @@
       city: h('input', { maxlength: 80, value: p.city || '', placeholder: 'المدينة أو المنطقة' }),
       brand: h('input', { maxlength: 40, value: p.brand || '', list: 'brand-list', dir: 'auto', placeholder: 'LG، Midea…' }),
       type: h('select', null, Object.entries(PTYPES).map(([k, l]) => h('option', { value: k, selected: (p.project_type || 'houses') === k }, l))),
-      label: h('select', null, Object.keys(UNIT_WORDS).map((k) => h('option', { value: k, selected: (p.unit_label || 'فيلا') === k }, k)))
+      label: h('select', null, Object.keys(UNIT_WORDS).map((k) => h('option', { value: k, selected: (p.unit_label || 'فيلا') === k }, k))),
+      cust: h('input', { maxlength: 200, value: p.customer_name || '', placeholder: 'اسم العميل أو الجهة' }),
+      phone: h('input', { type: 'tel', maxlength: 30, value: p.customer_phone || '', dir: 'ltr', inputmode: 'tel', placeholder: '07xx xxx xxxx' }),
+      addr: h('input', { maxlength: 300, value: p.site_address || '', placeholder: 'الحي، الشارع، أقرب نقطة دالة' }),
+      map: h('input', { type: 'url', maxlength: 500, value: p.map_url || '', dir: 'ltr', placeholder: 'https://maps.app.goo.gl/…' }),
+      contract: h('input', { type: 'date', value: p.contract_date || '', dir: 'ltr' }),
+      start: h('input', { type: 'date', value: p.start_date || '', dir: 'ltr' }),
+      due: h('input', { type: 'date', value: p.due_date || '', dir: 'ltr' })
     };
     const dl = h('datalist', { id: 'brand-list' }, BRAND_SUGGEST.map((b) => h('option', { value: b })));
     const grid = h('div', { class: 'form-grid' },
       field('اسم المشروع', el.name, { wide: true }), field('المحافظة', el.gov), field('المدينة', el.city),
-      field('الماركة', el.brand), field('نوع المشروع', el.type), field('اسم الوحدة', el.label, { hint: 'كيف تُسمّى وحدات هذا المشروع: فيلا، شقة، طابق…' }), dl);
+      field('الماركة', el.brand), field('نوع المشروع', el.type), field('اسم الوحدة', el.label, { hint: 'كيف تُسمّى وحدات هذا المشروع: فيلا، شقة، طابق…' }), dl,
+      h('h3', { class: 'fg-title wide' }, 'العميل والموقع'),
+      field('اسم العميل', el.cust), field('هاتف العميل', el.phone), field('عنوان الموقع', el.addr, { wide: true }),
+      field('رابط الموقع على الخريطة', el.map, { wide: true, hint: 'افتح الموقع في خرائط Google، واضغط مشاركة، وانسخ الرابط' }),
+      h('h3', { class: 'fg-title wide' }, 'العقد والمواعيد'),
+      field('تاريخ العقد', el.contract), field('تاريخ البدء المخطط', el.start), field('تاريخ التسليم', el.due, { hint: 'يصير المشروع متأخراً إذا فات هذا التاريخ ولم يكتمل' }));
     const values = () => ({ client: el.name.value.trim(), governorate: el.gov.value || null, city: el.city.value.trim() || null,
-      brand: el.brand.value.trim() || null, project_type: el.type.value, unit_label: el.label.value });
-    return { el, grid, values };
+      brand: el.brand.value.trim() || null, project_type: el.type.value, unit_label: el.label.value,
+      customer_name: el.cust.value.trim() || null, customer_phone: el.phone.value.trim() || null, site_address: el.addr.value.trim() || null,
+      map_url: el.map.value.trim() || null, contract_date: el.contract.value || p.contract_date || todayStr(), start_date: el.start.value || null, due_date: el.due.value || null });
+    // التحقق هنا للتوضيح فقط، والقاعدة تفرض نفس الشروط
+    const invalid = () => {
+      const v = values();
+      if (!v.client) return 'اكتب اسم المشروع';
+      if (v.customer_phone && !/^[0-9+ ()-]{4,30}$/.test(v.customer_phone)) return 'رقم الهاتف أرقام فقط';
+      if (v.map_url && !/^https:\/\/[^\s<>"]+$/.test(v.map_url)) return 'رابط الخريطة يجب أن يبدأ بـ https://';
+      if (v.start_date && v.due_date && v.due_date < v.start_date) return 'تاريخ التسليم قبل تاريخ البدء';
+      return '';
+    };
+    return { el, grid, values, invalid };
   }
 
   function newProject() {
@@ -708,7 +801,8 @@
     [{ label: 'إنشاء المشروع', cls: 'primary', run: async () => {
       const v = pf.values();
       const n = Number(count.value);
-      if (!v.client) { toast('اكتب اسم المشروع', 'error'); pf.el.name.focus(); return false; }
+      const bad = pf.invalid();
+      if (bad) { toast(bad, 'error'); return false; }
       if (!(Number.isInteger(n) && n >= 0 && n <= 2000)) { toast('عدد الوحدات من 0 إلى 2000', 'error'); return false; }
       const res = await state.sb.from('projects').insert(v).select().single();
       if (res.error) { fail(res.error); return false; }
@@ -723,6 +817,55 @@
       go('project/' + res.data.id + (isCompound(res.data) ? '/tracker' : ''));
     } }]);
   }
+
+  /* ---------- الفرق ---------- */
+  views.crews = {
+    title: 'الفرق',
+    render() {
+      const working = {};
+      state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => {
+        if (x.status === 'in_progress' && x.crew_id) (working[x.crew_id] ||= []).push({ p, x });
+      }));
+      const cpN = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
+      const edit = (c = {}) => {
+        const el = { name: h('input', { maxlength: 80, value: c.name || '', placeholder: 'مثال: فرقة أبو علي' }),
+          leader: h('input', { maxlength: 80, value: c.leader || '' }),
+          phone: h('input', { type: 'tel', maxlength: 30, dir: 'ltr', inputmode: 'tel', value: c.phone || '' }),
+          active: h('input', { type: 'checkbox', checked: c.active !== false }) };
+        modal(c.id ? 'تعديل الفرقة' : 'فرقة جديدة', h('div', { class: 'form-grid' }, field('اسم الفرقة', el.name, { wide: true }), field('رئيس الفرقة', el.leader), field('هاتف الرئيس', el.phone),
+          h('label', { class: 'check wide' }, el.active, ' الفرقة فعّالة (تظهر في الاختيار)')),
+        [{ label: 'حفظ', cls: 'primary', run: async () => {
+          const v = { name: el.name.value.trim(), leader: el.leader.value.trim() || null, phone: el.phone.value.trim() || null, active: el.active.checked };
+          if (!v.name) { toast('اكتب اسم الفرقة', 'error'); return false; }
+          if (v.phone && !/^[0-9+ ()-]{4,30}$/.test(v.phone)) { toast('رقم الهاتف أرقام فقط', 'error'); return false; }
+          const r = c.id ? await state.sb.from('crews').update(v).eq('id', c.id).select().maybeSingle() : await state.sb.from('crews').insert(v).select().single();
+          if (r.error || !r.data) { fail(r.error || 'permission denied'); return false; }
+          if (c.id) Object.assign(c, r.data); else state.crews.push(r.data);
+          state.crews.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+          toast('تم الحفظ'); render();
+        } }]);
+      };
+      const del = async (c) => {
+        if (!await window.UI.confirmBox({ title: 'حذف الفرقة', body: `ستُحذف "${c.name}"، وتبقى المراحل المسندة لها بدون فرقة.`, okText: 'حذف', danger: true })) return;
+        const r = await state.sb.from('crews').delete().eq('id', c.id).select();
+        if (r.error || !r.data?.length) return fail(r.error || 'permission denied');
+        state.crews = state.crews.filter((x) => x.id !== c.id); toast('تم الحذف'); render();
+      };
+      return h('div', { class: 'stack crews-page' },
+        h('div', { class: 'row between' }, h('h1', null, 'الفرق'), isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: () => edit() }, '+ فرقة جديدة') : null),
+        h('p', { class: 'muted' }, 'كل مرحلة جارية تُسند لفرقة، فتعرف أين تعمل كل فرقة الآن. الفرقة غير الفعّالة لا تظهر في الاختيار.'),
+        state.crews.length ? h('ul', { class: 'crew-cards' }, state.crews.map((c) => {
+          const at = working[c.id] || [];
+          return h('li', { class: 'crew-card' + (c.active ? '' : ' off') },
+            h('div', { class: 'cc-top' }, h('b', null, c.name), h('span', { class: 'chip ' + (at.length ? 'st-in-progress' : '') }, !c.active ? 'غير فعّالة' : at.length ? 'تعمل الآن' : 'متاحة')),
+            c.leader ? h('p', null, 'الرئيس: ' + c.leader) : null,
+            c.phone ? h('p', null, h('a', { href: 'tel:' + c.phone, dir: 'ltr' }, c.phone)) : null,
+            at.length ? h('ul', { class: 'cc-at' }, at.map((w) => h('li', null, h('a', { href: '#/project/' + w.p.id }, w.p.client), ' · ' + cpN[w.x.checkpoint] + (w.x.crew ? ` · ${num(w.x.crew)} كادر` : '')))) : null,
+            isStaff() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn sm', onClick: () => edit(c) }, 'تعديل'),
+              isAdmin() ? h('button', { type: 'button', class: 'btn sm ghost danger-text', onClick: () => del(c) }, 'حذف') : null) : null);
+        })) : empty('لا توجد فرق بعد', isStaff() ? 'أضف أول فرقة باسمها ورئيسها.' : 'يضيفها المدير أو المشرف.'));
+    }
+  };
 
   /* ---------- المستخدمون ---------- */
   views.users = {
@@ -802,9 +945,9 @@
         btn.disabled = true;
         try {
           const all = (t) => fetchAll((a, b) => state.sb.from(t).select('*').range(a, b));
-          const [units, checks, tests, ncrs, stages] = await Promise.all([all('units'), all('unit_checks'), all('test_records'), all('ncrs'), all('project_stages')]);
+          const [units, checks, tests, ncrs, stages, crews] = await Promise.all([all('units'), all('unit_checks'), all('test_records'), all('ncrs'), all('project_stages'), all('crews')]);
           download(new Blob([JSON.stringify({ app: 'surour-vrf-qc', version: 4, exported_at: new Date().toISOString(),
-            projects: state.projects, project_stages: stages, units, unit_checks: checks, test_records: tests, ncrs }, null, 1)], { type: 'application/json' }),
+            projects: state.projects, project_stages: stages, crews, units, unit_checks: checks, test_records: tests, ncrs }, null, 1)], { type: 'application/json' }),
           `surour-backup-${new Date().toISOString().slice(0, 10)}.json`);
           toast('تم التنزيل');
         } catch (e) { fail(e); }
@@ -817,7 +960,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));

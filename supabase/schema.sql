@@ -415,10 +415,9 @@ begin
   perform pg_temp.pol('audit_log', 'audit_select', 'select', admin, null);
 end $$;
 
--- أعمدة الإصدارات السابقة غير الموجودة في الملف
+-- أعمدة الإصدارات السابقة
 alter table public.projects drop column if exists phone;
 alter table public.projects drop column if exists address;
-alter table public.projects drop column if exists map_url;
 alter table public.projects drop column if exists size_m2;
 alter table public.projects drop column if exists floors;
 
@@ -475,6 +474,49 @@ drop policy if exists stages_update on public.project_stages;
 create policy stages_update on public.project_stages for update to authenticated using (public.is_staff()) with check (public.is_staff());
 drop policy if exists stages_delete on public.project_stages;
 create policy stages_delete on public.project_stages for delete to authenticated using (public.is_admin());
+
+-- ==========================================================
+-- بيانات العميل والعقد ومواعيد المشروع
+-- المتأخر: تاريخ التسليم فات والمشروع لم يكتمل
+-- ==========================================================
+alter table public.projects add column if not exists customer_name  text check (char_length(customer_name) <= 200);
+alter table public.projects add column if not exists customer_phone text check (customer_phone ~ '^[0-9+ ()-]{4,30}$');
+alter table public.projects add column if not exists site_address   text check (char_length(site_address) <= 300);
+alter table public.projects add column if not exists map_url        text check (char_length(map_url) <= 500 and map_url ~ '^https://[^\s<>"]+$');
+alter table public.projects add column if not exists start_date     date;
+alter table public.projects add column if not exists due_date       date;
+do $$ begin
+  alter table public.projects add constraint projects_dates_ok check (due_date is null or start_date is null or due_date >= start_date);
+exception when duplicate_object then null; end $$;
+
+-- ==========================================================
+-- الفرق: اسم الفرقة ورئيسها، وكل مرحلة تُسند لفرقة
+-- ==========================================================
+create table if not exists public.crews (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null unique check (char_length(btrim(name)) between 1 and 80),
+  leader      text check (char_length(leader) <= 80),
+  phone       text check (phone ~ '^[0-9+ ()-]{4,30}$'),
+  active      boolean not null default true,
+  created_at  timestamptz not null default now()
+);
+alter table public.project_stages add column if not exists crew_id uuid references public.crews (id) on delete set null;
+
+drop trigger if exists audit_crews on public.crews;
+create trigger audit_crews after insert or update or delete on public.crews
+  for each row execute function public.write_audit();
+
+alter table public.crews enable row level security;
+revoke all on public.crews from anon;
+grant select, insert, update, delete on public.crews to authenticated;
+drop policy if exists crews_select on public.crews;
+create policy crews_select on public.crews for select to authenticated using (public.app_role() is not null);
+drop policy if exists crews_insert on public.crews;
+create policy crews_insert on public.crews for insert to authenticated with check (public.is_staff());
+drop policy if exists crews_update on public.crews;
+create policy crews_update on public.crews for update to authenticated using (public.is_staff()) with check (public.is_staff());
+drop policy if exists crews_delete on public.crews;
+create policy crews_delete on public.crews for delete to authenticated using (public.is_admin());
 
 -- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:

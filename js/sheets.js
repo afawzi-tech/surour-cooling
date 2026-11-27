@@ -69,6 +69,30 @@
   const daysAgo = (d) => Math.max(0, Math.round((new Date(today()) - new Date(d)) / 86400000));
   const sinceText = (d) => { const n = daysAgo(d); return n === 0 ? 'اليوم' : n === 1 ? 'منذ يوم' : n === 2 ? 'منذ يومين' : n <= 10 ? `منذ ${num(n)} أيام` : `منذ ${num(n)} يوماً`; };
 
+  // قائمة الفرق الفعّالة (مع الفرقة الحالية حتى لو أصبحت غير فعّالة)
+  function crewSelect(cur) {
+    const list = S.crews.filter((c) => c.active || c.id === cur);
+    return h('select', { class: 'crew-sel' }, h('option', { value: '' }, list.length ? 'بدون فرقة' : 'لا توجد فرق بعد'),
+      list.map((c) => h('option', { value: c.id, selected: c.id === cur }, c.name + (c.leader ? ` (${c.leader})` : ''))));
+  }
+
+  // بطاقة العميل والمواعيد
+  function clientCard(p, sp) {
+    const sc = A.schedule(p, sp.pct, sp.status);
+    const safeMap = p.map_url && /^https:\/\/[^\s<>"]+$/.test(p.map_url) ? p.map_url : null;
+    const items = [
+      p.customer_name ? ['العميل', p.customer_name] : null,
+      p.customer_phone ? ['الهاتف', h('a', { href: 'tel:' + p.customer_phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, p.customer_phone)] : null,
+      p.site_address || safeMap ? ['الموقع', h('span', null, p.site_address || '', safeMap ? h('a', { href: safeMap, target: '_blank', rel: 'noopener noreferrer', class: 'map-link' }, 'فتح الخريطة ↗') : null)] : null,
+      p.contract_date ? ['تاريخ العقد', h('span', { dir: 'ltr' }, p.contract_date)] : null,
+      p.start_date ? ['البدء المخطط', h('span', { dir: 'ltr' }, p.start_date)] : null,
+      p.due_date ? ['التسليم', h('span', null, h('span', { dir: 'ltr' }, p.due_date), ' ', h('b', { class: 'due-tag' + (sc.late ? ' late' : sc.behind ? ' behind' : '') }, A.dueText(sc, sp.status)))] : null
+    ].filter(Boolean);
+    if (!items.length) return A.isStaff() ? h('p', { class: 'client-empty muted small' }, 'لا توجد بيانات عميل أو مواعيد. ', h('a', { href: `#/project/${p.id}/settings` }, 'أضفها من "بيانات المشروع"')) : null;
+    return h('section', { class: 'client-card' }, h('dl', null, items.map(([k, v]) => h('div', null, h('dt', null, k), h('dd', null, v)))),
+      sc.behind ? h('p', { class: 'behind-note' }, `متأخر عن الجدول: الإنجاز ${A.pctText(sp.pct)} والمتوقع حسب الوقت المنقضي ${A.pctText(sc.expected)}.`) : null);
+  }
+
   async function saveStage(p, key, patch) {
     const row = { project_id: p.id, checkpoint: key, ...patch };
     const r = await S.sb.from('project_stages').upsert(row, { onConflict: 'project_id,checkpoint' }).select().single();
@@ -87,6 +111,7 @@
       h('nav', { class: 'sheet-tabs', 'aria-label': 'أقسام المشروع' },
         [['stages', 'مراحل العمل'], ['settings', 'بيانات المشروع']].map(([k, l]) =>
           h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null }, l))),
+      tab === 'settings' ? null : clientCard(p, A.stageProgress(p)),
       h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : stagesSheet(p)));
   }
 
@@ -101,16 +126,16 @@
     const complete = async (btn) => {
       btn.disabled = true;
       const nx = nextAfter(cur.c.key);
-      const ok = await saveStage(p, cur.c.key, { status: 'done', crew: cur.s.crew ?? null });
-      if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: cur.s.crew ?? null });
+      const ok = await saveStage(p, cur.c.key, { status: 'done', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
+      if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
       if (ok) toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل');
       A.render();
     };
-    const start = async (btn, crew) => {
+    const start = async (btn, crew, team) => {
       btn.disabled = true;
       const n = crew.value === '' ? null : Number(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { btn.disabled = false; return toast('عدد الكوادر من 0 إلى 500', 'error'); }
-      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n })) toast(`بدأت مرحلة "${cur.c.name_ar}"`);
+      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n, crew_id: team.value || null })) toast(`بدأت مرحلة "${cur.c.name_ar}"`);
       A.render();
     };
 
@@ -121,18 +146,23 @@
     } else if (cur) {
       const ip = cur.s.status === 'in_progress';
       const crew = h('input', { type: 'number', min: 0, max: 500, inputmode: 'numeric', dir: 'ltr', placeholder: '0', value: cur.s.crew ?? '' , class: 'crew-in' });
+      // اقتراح فرقة المرحلة السابقة
+      const prevCrew = [...sp.list].reverse().find((x) => x.s.status === 'done' && x.s.crew_id)?.s.crew_id;
+      const team = crewSelect(cur.s.crew_id || prevCrew || '');
+      const crewName = A.crewOf(cur.s.crew_id)?.name;
       panel = h('section', { class: 'now-card ' + (ip ? 'ip' : 'ns') },
         h('span', { class: 'nc-tag' }, ip ? `المرحلة الحالية · ${num(cur.c.position)} من ${num(total)}` : `المرحلة التالية · ${num(cur.c.position)} من ${num(total)}`),
         h('h2', null, cur.c.name_ar),
-        ip ? h('p', null, (cur.s.start_date ? `بدأت ${sinceText(cur.s.start_date)} (${cur.s.start_date})` : 'جارية') + (cur.s.crew ? ` · ${num(cur.s.crew)} كادر` : ''))
+        ip ? h('p', null, (cur.s.start_date ? `بدأت ${sinceText(cur.s.start_date)} (${cur.s.start_date})` : 'جارية') + (crewName ? ` · ${crewName}` : '') + (cur.s.crew ? ` · ${num(cur.s.crew)} كادر` : ''))
           : h('p', null, sp.done ? 'المرحلة السابقة اكتملت. ابدأ هذه عندما يبدأ العمل فعلاً.' : 'لم يبدأ العمل في المشروع بعد.'),
         staff ? (ip
           ? h('div', { class: 'nc-actions' },
               h('button', { type: 'button', class: 'btn primary big', onClick: (e) => complete(e.currentTarget) }, '✓ اكتملت هذه المرحلة'),
               h('button', { type: 'button', class: 'btn ghost', onClick: () => stageDialog(p, cur.c) }, 'تعديل التفاصيل'))
           : h('div', { class: 'nc-actions' },
+              h('label', { class: 'crew-label' }, 'الفرقة', team),
               h('label', { class: 'crew-label' }, 'عدد الكوادر', crew),
-              h('button', { type: 'button', class: 'btn primary big', onClick: (e) => start(e.currentTarget, crew) }, '▶ ابدأ المرحلة'),
+              h('button', { type: 'button', class: 'btn primary big', onClick: (e) => start(e.currentTarget, crew, team) }, '▶ ابدأ المرحلة'),
               h('button', { type: 'button', class: 'btn ghost', onClick: async () => { await saveStage(p, cur.c.key, { status: 'na' }); A.render(); } }, 'لا تنطبق على هذا المشروع')))
           : h('p', { class: 'muted small' }, 'تحديث المراحل للمدير والمشرف.'),
         ip && nextAfter(cur.c.key) ? h('p', { class: 'nc-next' }, `بعدها: ${nextAfter(cur.c.key).c.name_ar}`) : null);
@@ -144,7 +174,7 @@
       const inner = [
         h('span', { class: 'sp-dot' }, s.status === 'done' ? '✓' : s.status === 'na' ? '—' : num(c.position)),
         h('span', { class: 'sp-body' }, h('b', null, c.name_ar),
-          h('small', null, [dates, s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter(Boolean).join(' · ') || ' ')),
+          h('small', null, [dates, A.crewOf(s.crew_id)?.name || '', s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter(Boolean).join(' · ') || ' ')),
         h('span', { class: 'chip sp-st ' + ST_CLS[s.status] }, A.STAGE_AR[s.status])
       ];
       return h('li', { class: `step ${ST_CLS[s.status]}${isCur ? ' cur' : ''}` },
@@ -173,15 +203,16 @@
     const sd = h('input', { type: 'date', value: s.start_date || '', dir: 'ltr' });
     const ed = h('input', { type: 'date', value: s.end_date || '', dir: 'ltr' });
     const crew = h('input', { type: 'number', min: 0, max: 500, inputmode: 'numeric', dir: 'ltr', value: s.crew ?? '' });
+    const team = crewSelect(s.crew_id || '');
     const notes = h('textarea', { rows: 3, maxlength: 2000 }, s.notes || '');
     A.modal(`${num(c.position)}. ${c.name_ar}`, h('div', { class: 'stack sm' }, seg,
       h('div', { class: 'form-grid' }, A.field('تاريخ البدء', sd, { hint: 'يُملأ تلقائياً عند "جارية"' }), A.field('تاريخ الانتهاء', ed, { hint: 'يُملأ تلقائياً عند "مكتملة"' }),
-        A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }))),
+        A.field('الفرقة', team), A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }))),
     [{ label: 'حفظ', cls: 'primary', run: async () => {
       const n = crew.value === '' ? null : Number(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { toast('عدد الكوادر من 0 إلى 500', 'error'); return false; }
       if (sd.value && ed.value && ed.value < sd.value) { toast('تاريخ الانتهاء قبل تاريخ البدء', 'error'); return false; }
-      const ok = await saveStage(p, c.key, { status, start_date: sd.value || null, end_date: ed.value || null, crew: n, notes: notes.value.trim() || null });
+      const ok = await saveStage(p, c.key, { status, start_date: sd.value || null, end_date: ed.value || null, crew: n, crew_id: team.value || null, notes: notes.value.trim() || null });
       if (!ok) return false;
       toast('تم الحفظ'); A.render();
     } }]);
@@ -201,7 +232,7 @@
     return h('section', { class: 'panel stack sm' }, h('h3', null, 'بيانات المشروع'), pf.grid,
       h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary sm', onClick: async () => {
         const v = pf.values();
-        if (!v.client) return toast('اسم المشروع مطلوب', 'error');
+        if (pf.invalid()) return toast(pf.invalid(), 'error');
         const r = await S.sb.from('projects').update(v).eq('id', p.id).select().maybeSingle();
         if (r.error || !r.data) return A.fail(r.error || 'permission denied');
         Object.assign(p, r.data); toast('تم حفظ بيانات المشروع'); A.render();
@@ -873,7 +904,7 @@
           const pf = A.projectFields(p);
           return h('div', { class: 'stack sm' }, pf.grid, h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary sm', onClick: async () => {
             const v = pf.values();
-            if (!v.client) return toast('اسم المشروع مطلوب', 'error');
+            if (pf.invalid()) return toast(pf.invalid(), 'error');
             const r = await S.sb.from('projects').update(v).eq('id', p.id).select().maybeSingle();
             if (r.error || !r.data) return A.fail(r.error || 'permission denied');
             Object.assign(p, r.data); toast('تم حفظ بيانات المشروع'); A.render();
