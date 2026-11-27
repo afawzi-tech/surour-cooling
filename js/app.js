@@ -113,7 +113,12 @@
     if (!ok || !window.supabase) return renderSetupNeeded();
     state.sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } });
     state.sb.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') { Object.assign(state, { user: null, profile: null, projects: [], data: {} }); render(); }
+      if (event === 'SIGNED_OUT') {
+        // لا يبقى شيء من بيانات المستخدم السابق لمن يدخل بعده على نفس الجهاز
+        for (const k of Object.keys(state)) if (k.startsWith('_')) delete state[k];
+        Object.assign(state, { user: null, profile: null, projects: [], data: {}, stages: {}, crews: [], crewUnits: [], requests: [], people: {} });
+        render();
+      }
       else if (event === 'SIGNED_IN' && session && session.user.id !== state.user?.id) setTimeout(() => startSession(session.user), 0);
     });
     const { data } = await state.sb.auth.getSession();
@@ -127,9 +132,21 @@
     state.profile = data;
     if (data && data.active) {
       clear(root).appendChild(h('div', { class: 'loading' }, 'جارٍ التحميل…'));
-      try { await loadBase(); } catch (e) { fail(e); }
+      try { await loadBase(); state._loadError = null; } catch (e) { state._loadError = e; }
     }
     render();
+  }
+
+  // تعذّر التحميل (انقطاع الإنترنت مثلاً): شاشة "أعد المحاولة" بدل صفحة فارغة توحي بأن لا مشاريع
+  function viewLoadError() {
+    const retry = h('button', { type: 'button', class: 'btn primary big', onClick: async () => {
+      retry.disabled = true; retry.textContent = 'جارٍ التحميل…';
+      try { await loadBase(); state._loadError = null; } catch (e) { state._loadError = e; }
+      render();
+    } }, 'أعد المحاولة');
+    return h('div', { class: 'auth' }, h('div', { class: 'auth-card load-err' }, h('div', { class: 'le-ic', 'aria-hidden': 'true' }, '📡'),
+      h('h1', null, 'تعذّر تحميل البيانات'), h('p', { class: 'muted' }, errText(state._loadError) + '. تأكد من الاتصال ثم أعد المحاولة.'), retry,
+      h('button', { type: 'button', class: 'btn ghost', onClick: signOut }, 'خروج')));
   }
 
   /* ---------- التوجيه ---------- */
@@ -146,6 +163,7 @@
     if (!state.sb) return renderSetupNeeded();
     if (!state.user) return root.appendChild(viewLogin());
     if (!state.profile || !state.profile.active) return root.appendChild(viewInactive());
+    if (state._loadError) return root.appendChild(viewLoadError());
 
     const r = parseRoute();
     // مشروع واحد فقط؟ افتحه مباشرة مثل فتح ملف Excel
@@ -160,6 +178,9 @@
     // صفحة جديدة تبدأ من الأعلى (لا تبقى بمكان التمرير السابق)
     if (entering) window.scrollTo(0, 0);
     const main = h('main', { class: 'main' });
+    // كتابة لم تُحفظ بعد: تمنع إعادة الرسم التلقائية (مثل تدوير الهاتف)
+    state._dirty = false;
+    main.addEventListener('input', () => { state._dirty = true; });
     root.appendChild(h('div', { class: 'app app-side' }, ...topbar(r).filter(Boolean), main));
     const done = (n) => { clear(main).appendChild(n); if (entering) { main.classList.add('enter'); countUp(main); } };
     const out = v.render(r);
@@ -727,7 +748,7 @@
       const clearBtn = h('button', { type: 'button', class: 'btn ghost sm', onClick: reset }, 'مسح التصفية');
       draw();
       // "/" يركّز البحث (مثل أغلب التطبيقات)
-      const onKey = (e) => { if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement?.tagName || '')) { e.preventDefault(); search.focus(); } };
+      const onKey = (e) => { if (e.key === '/' && location.hash.startsWith('#/projects') && search.isConnected && !/input|textarea|select/i.test(document.activeElement?.tagName || '')) { e.preventDefault(); search.focus(); } };
       document.removeEventListener('keydown', state._plKey || (() => {})); state._plKey = onKey; document.addEventListener('keydown', onKey);
       return h('div', { class: 'stack plist' },
         h('div', { class: 'row between' }, h('h1', null, 'المشاريع'),

@@ -46,7 +46,10 @@
   const statusChip = (U) => h('span', { class: 'chip st-' + U.replace(/\s/g, '-').toLowerCase() }, A.STATUS_AR[U]);
 
   // إعادة الرسم عند التبديل بين الجوال والكمبيوتر
-  window.matchMedia('(max-width: 760px)').addEventListener('change', () => { if (location.hash.includes('/project/')) A.render(); });
+  // عند تدوير الهاتف أو تغيير العرض: نعيد الرسم فقط إذا لا توجد كتابة غير محفوظة ولا نافذة مفتوحة
+  window.matchMedia('(max-width: 760px)').addEventListener('change', () => {
+    if (location.hash.includes('/project/') && !S._dirty && !document.getElementById('dialog').open) A.render();
+  });
 
   /* ---------- صفحة المشروع ---------- */
   A.views.project = {
@@ -358,8 +361,8 @@
     const pf = A.projectFields(p);
     const del = async () => {
       if (!await confirmBox({ title: 'حذف المشروع', body: `سيُحذف "${p.client}" مع كل مراحله وبياناته نهائياً.`, okText: 'حذف نهائي', danger: true })) return;
-      const r = await S.sb.from('projects').delete().eq('id', p.id);
-      if (r.error) return A.fail(r.error);
+      const r = await S.sb.from('projects').delete().eq('id', p.id).select('id');
+      if (r.error || !r.data?.length) return A.fail(r.error || 'permission denied');
       S.projects = S.projects.filter((x) => x.id !== p.id); delete S.data[p.id]; delete S.stages[p.id];
       S._stayHome = true; A.go('home');
     };
@@ -379,7 +382,7 @@
     const items = [
       ['تقرير اليوم', () => dailyReport(p, d), A.isStaff()],
       [`+ ${W.many}`, () => addVillas(p, d), A.isStaff()],
-      ['↻ تحديث', async () => { await A.loadProject(p.id, true); A.render(); }, true],
+      ['↻ تحديث', async () => { try { await A.loadProject(p.id, true); A.render(); toast('تم التحديث'); } catch (e) { A.fail(e); } }, true],
       ['استيراد Excel', () => importDialog(p), A.isStaff()],
       ['تصدير Excel', () => exportExcel(p, d), true]
     ].filter((x) => x[2]);
@@ -965,8 +968,8 @@
     } }];
     if (n && A.isAdmin()) actions.unshift({ label: 'حذف', cls: 'danger', run: async () => {
       if (!await confirmBox({ title: 'حذف NCR', body: `حذف ${n.ncr_no} نهائياً؟`, okText: 'حذف', danger: true })) return false;
-      const r = await S.sb.from('ncrs').delete().eq('id', n.id);
-      if (r.error) { A.fail(r.error); return false; }
+      const r = await S.sb.from('ncrs').delete().eq('id', n.id).select('id');
+      if (r.error || !r.data?.length) { A.fail(r.error || 'permission denied'); return false; }
       d.ncrs.splice(d.ncrs.indexOf(n), 1); A.render();
     } });
     A.modal(n ? `تعديل ${n.ncr_no}` : 'حالة عدم مطابقة جديدة', h('div', { class: 'form-grid' },
@@ -1019,8 +1022,8 @@
   function sheetGuide(p) {
     const del = async () => {
       if (!await confirmBox({ title: 'حذف المشروع', body: `سيُحذف "${p.client}" مع كل ${W.theMany} والنتائج والقراءات وNCR نهائياً.`, okText: 'حذف نهائي', danger: true })) return;
-      const r = await S.sb.from('projects').delete().eq('id', p.id);
-      if (r.error) return A.fail(r.error);
+      const r = await S.sb.from('projects').delete().eq('id', p.id).select('id');
+      if (r.error || !r.data?.length) return A.fail(r.error || 'permission denied');
       S.projects = S.projects.filter((x) => x.id !== p.id); delete S.data[p.id];
       S._stayHome = true; A.go('home');
     };
@@ -1297,34 +1300,53 @@
         const r = await S.sb.from('units').insert(fresh.slice(i, i + 500));
         if (r.error) throw r.error;
       }
-      for (const r of rows) {
-        const e = existing.get(r.code);
-        if (e && (e.zone !== r.zone || (e.crew_id || null) !== r.crew_id || e.remarks !== r.remarks || e.position !== r.position)) {
-          const x = await S.sb.from('units').update({ zone: r.zone, crew_id: r.crew_id, remarks: r.remarks, position: r.position }).eq('id', e.id);
+      // تعديل الوحدات الموجودة: 10 طلبات بالتوازي بدل واحد بعد واحد
+      const edits = rows.filter((r) => { const e = existing.get(r.code); return e && (e.zone !== r.zone || (e.crew_id || null) !== r.crew_id || e.remarks !== r.remarks || e.position !== r.position); });
+      for (let i = 0; i < edits.length; i += 10) {
+        await Promise.all(edits.slice(i, i + 10).map(async (r) => {
+          const x = await S.sb.from('units').update({ zone: r.zone, crew_id: r.crew_id, remarks: r.remarks, position: r.position }).eq('id', existing.get(r.code).id);
           if (x.error) errors.push(r.code + ': ' + A.errText(x.error));
-        }
+        }));
       }
       const d2 = await A.loadProject(p.id, true);
       const byCode = new Map(d2.units.map((u) => [u.code, u]));
 
+      // النتائج المتغيّرة فقط، بدفعات من 500 عبر دالة set_unit_checks (طلب واحد لكل دفعة بدل طلب لكل خانة)
       let done = 0;
+      const delta = [];
       for (const u of units) {
         const cur = byCode.get(u.code);
-        for (const [k, v] of Object.entries(u.results)) {
-          if (v === (cur.results?.[k] || 'pending')) continue;
-          const r = await S.sb.from('unit_checks').update({ result: v }).eq('unit_id', cur.id).eq('checkpoint', k);
-          if (r.error) errors.push(`${u.code} ${k}: ${A.errText(r.error)}`); else done++;
+        for (const [k, v] of Object.entries(u.results)) if (v !== (cur.results?.[k] || 'pending')) delta.push({ unit_id: cur.id, checkpoint: k, result: v, code: u.code });
+      }
+      let rpc = true;
+      for (let i = 0; i < delta.length; i += 500) {
+        const part = delta.slice(i, i + 500);
+        if (rpc) {
+          const r = await S.sb.rpc('set_unit_checks', { p_rows: part.map(({ unit_id, checkpoint, result }) => ({ unit_id, checkpoint, result })) });
+          if (!r.error) { done += part.length; say(`النتائج: ${done} من ${changes}…`); continue; }
+          if (!/set_unit_checks|PGRST202|function/i.test(r.error.message || '')) { errors.push(A.errText(r.error)); continue; }
+          rpc = false;   // القاعدة بلا الدالة بعد: نرجع للطريقة القديمة
+        }
+        for (const x of part) {
+          const r = await S.sb.from('unit_checks').update({ result: x.result }).eq('unit_id', x.unit_id).eq('checkpoint', x.checkpoint);
+          if (r.error) errors.push(`${x.code} ${x.checkpoint}: ${A.errText(r.error)}`); else done++;
           if (done % 10 === 0) say(`النتائج: ${done} من ${changes}…`);
         }
       }
       say('القراءات…');
+      // القراءات بدفعات من 500 في طلب واحد لكل دفعة
       let tDone = 0;
+      const tRows = [];
       for (const t of tests) {
         const u = byCode.get(t.code);
         if (!u) { errors.push(t.code + `: ${W.the} غير موجودة (Test Records)`); continue; }
         const { code: _code, ...row } = t;
-        const r = await S.sb.from('test_records').upsert({ ...row, unit_id: u.id }, { onConflict: 'unit_id' });
-        if (r.error) errors.push(t.code + ': ' + A.errText(r.error)); else tDone++;
+        tRows.push({ ...row, unit_id: u.id });
+      }
+      for (let i = 0; i < tRows.length; i += 500) {
+        const part = tRows.slice(i, i + 500);
+        const r = await S.sb.from('test_records').upsert(part, { onConflict: 'unit_id' });
+        if (r.error) errors.push(A.errText(r.error)); else tDone += part.length;
       }
       if (limits) {
         const r = await S.sb.from('projects').update(limits).eq('id', p.id).select().maybeSingle();

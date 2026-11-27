@@ -1408,3 +1408,5 @@ a.pill-btn:active { transform: scale(.96); }
 .xl.tracker td.stk { min-width: 64px; }
 @media (max-width: 1400px) { .xl.tracker thead th:last-child, .xl.tracker td.rem { display: none; } }
 @media (max-width: 760px) { .avg-card { padding: 12px 14px; } .avg-card .st-ring.lg { width: 60px; height: 60px; } .avg-card .st-face b { font-size: .8rem; } }
+.load-err { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.le-ic { font-size: 2.4rem; }
