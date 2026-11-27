@@ -361,6 +361,9 @@ grant select, insert, update, delete on public.test_records   to authenticated;
 grant select, insert, update, delete on public.ncrs           to authenticated;
 grant select, insert, update, delete on public.materials      to authenticated;
 grant select                         on public.audit_log      to authenticated;
+-- دالة admin-create-user تعمل بدور service_role على الخادم: تقرأ دور الطالب، وتضبط الملف، وتكتب في السجل
+grant select, insert, update on public.profiles  to service_role;
+grant insert                 on public.audit_log to service_role;
 grant select                         on public.unit_overview  to authenticated;
 
 create or replace function pg_temp.pol(t text, name text, cmd text, using_expr text, check_expr text)
