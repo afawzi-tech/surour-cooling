@@ -740,6 +740,19 @@
     }
   };
 
+  // أرقام قسم المجمّعات: مجمّع واحد ← متابعة وحداته مصفّاة، وأكثر ← قائمة المجمّعات
+  function compoundDrill(rows, st) {
+    const has = st === 'Has failure' ? (r) => r.D.B7 : st === 'alert' ? (r) => r.D.B8 : st === 'ncr' ? (r) => r.D.B9 : st === 'Complete' ? (r) => r.D.B4 : () => true;
+    const target = rows.length === 1 ? rows[0] : rows.filter(has).length === 1 ? rows.filter(has)[0] : null;
+    if (st && target) {
+      if (st === 'ncr') { state._nf = { status: 'open' }; return go(`project/${target.p.id}/ncr`); }
+      state._tf = { q: '', zone: '', crew: '', status: st === 'all' ? '' : st, next: '', sort: 'code' };
+      return go(`project/${target.p.id}/tracker`);
+    }
+    state._pf = { ...PF_DEFAULT, type: 'compound', st: ['Has failure', 'alert', 'ncr'].includes(st) ? 'attn' : '' };
+    go('projects');
+  }
+
   // لوحة مجموعة مشاريع: كل الشركة، أو المجمّعات السكنية فقط
   async function portfolio(scope) {
     {
@@ -766,7 +779,8 @@
       const attn = rows.filter((r) => issues(r)).sort((a, b) => (b.late - a.late) || (issues(b) - issues(a)));
 
       const lead = !rows.length ? (scope === 'compounds' ? 'لا توجد مجمّعات سكنية بعد. أنشئ مشروعاً واختر نوعه "مجمّع سكني".' : 'لا توجد مشاريع بعد. أنشئ أول مشروع لتبدأ المتابعة.')
-        : `${num(rows.length)} ${rows.length === 1 ? noun[0] : rows.length <= 10 ? noun[1] : noun[2]} في ${num(govCount)} ${govCount === 1 ? 'محافظة' : 'محافظات'}، فيها ${num(sum('B3'))} وحدة. `
+        : (rows.length === 1 ? noun[0] + ' واحد' : `${num(rows.length)} ${rows.length <= 10 ? noun[1] : noun[2]}`)
+          + (govCount ? ` في ${cntAr(govCount, 'محافظة واحدة', 'محافظتين', 'محافظات', 'محافظة')}` : '') + `، ${rows.length === 1 ? 'فيه' : 'فيها'} ${num(sum('B3'))} وحدة. `
           + (attn.length ? `${attn.length === 1 ? noun[0] + ' واحد يحتاج' : num(attn.length) + ' ' + noun[1] + ' تحتاج'} انتباهك.` : 'لا مشاكل مفتوحة الآن.');
 
       // خريطة المحافظات
@@ -778,7 +792,7 @@
         const prob = rs.some((x) => x.fails || x.open) ? ' flag-fail' : rs.some((x) => x.alerts) ? ' flag-alert' : '';
         const label = `${g}: ${rs.length ? `${rs.length} ${noun[0]}، إنجاز ${pctText(gd ? gp / gd : 0)}` : 'لا ' + noun[1]}`;
         const el = h('button', { type: 'button', role: 'listitem', class: `gov tile ${band(gd ? gp / gd : 0, rs.length)}${prob}${f.gov === g ? ' sel' : ''}`, title: label, 'aria-label': label, 'aria-pressed': String(f.gov === g),
-          onClick: () => { f.gov = f.gov === g ? '' : g; render(); } }, h('span', { class: 'g-name' }, g), rs.length ? h('b', null, String(rs.length)) : null);
+          onClick: () => { state._pf = { ...PF_DEFAULT, type: 'compound', gov: g }; go('projects'); } }, h('span', { class: 'g-name' }, g), rs.length ? h('b', null, String(rs.length)) : null);
         el.style.gridColumn = String(c); el.style.gridRow = String(r);
         return el;
       }));
@@ -828,9 +842,10 @@
           h('div', { class: 'd2-pct' }, h('strong', null, pctText(overall)), h('span', null, scope === 'compounds' ? 'من فحوصات المجمّعات منجزة' : 'من فحوصات كل المشاريع منجزة'))),
         compBanner,
         h('dl', { class: 'd2-stats' }, [
-          [scope === 'compounds' ? 'المجمّعات' : 'المشاريع', rows.length, ''], ['الوحدات', sum('B3'), ''], ['وحدات مكتملة', sum('B4'), 'ok'],
-          ['فيها بند فاشل', sum('B7'), sum('B7') ? 'bad' : 'muted'], ['تنبيهات تسلسل', sum('B8'), sum('B8') ? 'warn' : 'muted'], ['NCR مفتوحة', sum('B9'), sum('B9') ? 'bad' : 'muted']
-        ].map(([l, v, c]) => h('div', { class: 'st ' + c }, h('dd', null, num(v)), h('dt', null, l)))),
+          [scope === 'compounds' ? 'المجمّعات' : 'المشاريع', rows.length, '', ''], ['الوحدات', sum('B3'), '', 'all'], ['وحدات مكتملة', sum('B4'), 'ok', 'Complete'],
+          ['فيها بند فاشل', sum('B7'), sum('B7') ? 'bad' : 'muted', 'Has failure'], ['تنبيهات تسلسل', sum('B8'), sum('B8') ? 'warn' : 'muted', 'alert'], ['NCR مفتوحة', sum('B9'), sum('B9') ? 'bad' : 'muted', 'ncr']
+        ].map(([l, v, c, st]) => h('div', { class: 'st ' + c }, h('button', { type: 'button', class: 'st-btn', title: 'عرض: ' + l, onClick: () => compoundDrill(rows, st) },
+          h('dd', null, num(v)), h('dt', null, l, h('span', { class: 'st-go', 'aria-hidden': 'true' }, ' ←')))))),
         h('div', { class: 'd2-grid' },
           h('section', { class: 'd2-plan' },
             h('div', { class: 'd2-plan-head' }, h('h2', null, scope === 'compounds' ? 'المجمّعات حسب المحافظة' : 'المشاريع حسب المحافظة'),
@@ -846,7 +861,7 @@
                 : h('p', { class: 'calm' }, 'لا فشل ولا تنبيهات ولا NCR مفتوحة.')),
             h('section', { class: 'd2-brands' }, h('h2', null, 'حسب الماركة'),
               byBrand.length ? h('ul', { class: 'brand-list' }, byBrand.map((x) => h('li', null,
-                h('button', { type: 'button', class: f.brand === x.b ? 'sel' : '', 'aria-pressed': String(f.brand === x.b), onClick: () => { f.brand = f.brand === x.b ? '' : x.b; render(); } },
+                h('button', { type: 'button', onClick: () => { state._pf = { ...PF_DEFAULT, type: 'compound', brand: x.b }; go('projects'); } },
                   h('b', { dir: 'auto' }, x.b), h('small', null, `${x.n} ${noun[0]}، ${num(x.units)} وحدة`),
                   h('span', { class: 'st-bar' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })), h('span', { class: 'bp' }, pctText(x.pct))))))
                 : h('p', { class: 'calm' }, '—')))),
