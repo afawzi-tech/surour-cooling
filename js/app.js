@@ -93,6 +93,29 @@
 
   const crewOf = (id) => state.crews.find((c) => c.id === id) || null;
 
+  /* ---------- التوقّع بالوتيرة الحالية ----------
+     إذا استمر المشروع بنفس سرعته منذ بدء العمل الفعلي (أول مرحلة بدأت، وإلا البدء المخطط)، متى ينتهي؟
+     المدة المتوقعة = الأيام المنقضية ÷ نسبة الإنجاز. الفرق عن التسليم: موجب = قبل الموعد، سالب = بعده. */
+  const addDays = (d, n) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * DAY).toISOString().slice(0, 10);
+  const FC_MIN = 0.15;
+  function forecast(p, pct, status) {
+    if (status !== 'in_progress' || !(pct >= FC_MIN) || pct >= 1) return null;   // قبل 15% الوتيرة غير معبّرة بعد
+    const first = Object.values(state.stages[p.id] || {}).map((x) => x.start_date).filter(Boolean).sort()[0] || null;
+    const start = first || p.start_date;
+    const t = todayStr();
+    if (!start || start > t) return null;
+    const elapsed = dayDiff(t, start) + 1;
+    if (elapsed < 3) return null;                  // أقل من 3 أيام: الوتيرة غير معبّرة بعد
+    const end = addDays(start, Math.ceil(elapsed / pct) - 1);
+    return { start, end, elapsed, left: dayDiff(end, t), diff: p.due_date ? dayDiff(p.due_date, end) : null, actual: !!first };
+  }
+  function forecastText(fc, short) {
+    if (!fc) return '';
+    const vs = fc.diff === null ? '' : fc.diff > 0 ? `قبل الموعد بـ${daysAr(fc.diff)}` : fc.diff < 0 ? `بعد الموعد بـ${daysAr(-fc.diff)}` : 'في موعد التسليم';
+    if (short) return vs ? `التوقّع: ${vs}` : `التوقّع: ${fc.end}`;
+    return `بالوتيرة الحالية ينتهي حوالي ${fc.end}` + (vs ? `، ${vs}` : '');
+  }
+
   async function loadProject(id, force = false) {
     if (state.data[id] && !force) return state.data[id];
     const sb = state.sb;
@@ -116,7 +139,7 @@
       if (event === 'SIGNED_OUT') {
         // لا يبقى شيء من بيانات المستخدم السابق لمن يدخل بعده على نفس الجهاز
         for (const k of Object.keys(state)) if (k.startsWith('_')) delete state[k];
-        Object.assign(state, { user: null, profile: null, projects: [], data: {}, stages: {}, crews: [], crewUnits: [], requests: [], people: {} });
+        Object.assign(state, { user: null, profile: null, projects: [], data: {}, stages: {}, crews: [], crewUnits: [], requests: [], people: {}, tasks: [], taskReqs: [], staffList: [], tasksReady: false, notes: [], notesReady: false });
         render();
       }
       else if (event === 'SIGNED_IN' && session && session.user.id !== state.user?.id) setTimeout(() => startSession(session.user), 0);
@@ -227,6 +250,9 @@
     backup: ['M12 3v12', 'M7 10l5 5 5-5', 'M4 19h16'],
     techs: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
     reports: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M8 12l2.5 2.5L16 9', 'M8 18h8'],
+    calendar: ['M4 5h16v16H4z', 'M4 10h16', 'M8 3v4', 'M16 3v4', 'M8 14h2', 'M14 14h2', 'M8 18h2'],
+    tasks: ['M4 5h4v4H4z', 'M4 15h4v4H4z', 'M11 7h9', 'M11 17h9', 'M5 7l1 1 2-2'],
+    search: ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z', 'M21 21l-5-5'],
     more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
   };
   function icon(k) {
@@ -242,7 +268,9 @@
     const menu = [
       ['home', 'لوحة التحكم', true],
       ['projects', 'المشاريع', true],
+      ['tasks', isStaff() ? 'المهام' : 'مهامي', !!window.Tasks],
       ['crews', 'الفرق والمقاولون', true],
+      ['calendar', 'تقويم المواعيد', true],
       ['techs', isStaff() ? 'أداء الفنيين' : 'أدائي', true],
       ['compounds', 'المجمّعات السكنية', true],
       ['reports', 'سجل التقارير', true],
@@ -251,7 +279,7 @@
       ['backup', 'نسخة احتياطية', isStaff()]
     ].filter((x) => x[2]);
     const stay = (k) => (k === 'home' ? () => { state._stayHome = true; } : null);
-    const SHORT = { home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات', techs: isStaff() ? 'الأداء' : 'أدائي' };
+    const SHORT = { tasks: isStaff() ? 'المهام' : 'مهامي', calendar: 'المواعيد', home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات', techs: isStaff() ? 'الأداء' : 'أدائي' };
     const link = ([k, l]) => h('a', { href: '#/' + k, class: navOn === k ? 'on' : '', 'aria-current': navOn === k ? 'page' : null, onClick: stay(k), 'aria-label': l }, icon(k),
       h('span', { class: 'nl-full' }, l), SHORT[k] ? h('span', { class: 'nl-short', 'aria-hidden': 'true' }, SHORT[k]) : null);
     const me = h('div', { class: 'side-me' },
@@ -271,10 +299,14 @@
     return [
       h('aside', { class: 'side', 'aria-label': 'القائمة الرئيسية' },
         h('a', { href: '#/home', class: 'side-logo', onClick: stay('home') }, logo(), h('span', null, 'متابعة المشاريع')),
+        window.Collab ? window.Collab.bell('side-bell') : null,
+        window.Insights ? h('button', { type: 'button', class: 'side-search', onClick: () => window.Insights.search() }, icon('search'), h('span', null, 'بحث'), h('kbd', { dir: 'ltr' }, 'Ctrl K')) : null,
         h('nav', { class: 'side-nav' }, menu.map(link)),
         p ? h('div', { class: 'side-proj' }, h('small', null, 'المشروع المفتوح'), h('a', { href: '#/project/' + p.id }, p.client)) : null,
         me),
-      h('header', { class: 'mtop' }, h('a', { href: '#/home', onClick: stay('home') }, logo()), p ? h('span', { class: 'mtop-crumb' }, p.client) : null),
+      h('header', { class: 'mtop' }, h('a', { href: '#/home', onClick: stay('home') }, logo()), p ? h('span', { class: 'mtop-crumb' }, p.client) : null,
+        window.Collab ? window.Collab.bell('mtop-bell') : null,
+        window.Insights ? h('button', { type: 'button', class: 'mtop-search', 'aria-label': 'بحث', onClick: () => window.Insights.search() }, icon('search')) : null),
       // في صفحات المجمّع يظهر شريط المجمّع السفلي بدل هذا
       p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 2).map(link),
         h('button', { type: 'button', class: 'mbar-plus', 'aria-label': 'إضافة', onClick: plusSheet }, h('span', { 'aria-hidden': 'true' }, '+')),
@@ -460,7 +492,7 @@
       const why = [fails ? `${num(fails)} وحدة فيها فشل` : '', D.B8 ? `${num(D.B8)} تنبيه تسلسل` : '', D.B9 ? `${num(D.B9)} NCR مفتوحة` : '', late ? `${num(late)} متأخرة` : ''].filter(Boolean);
       const sc = schedule(p, D.B10, status);
       if (sc.late) why.unshift(`متأخر ${daysAr(-sc.daysLeft)} عن التسليم`); else if (sc.behind) why.unshift('متأخر عن الجدول');
-      return { p, pct: D.B10, status, why, flag: why[0] || '', bad: !!(fails || D.B9 || sc.late), compound: true, sc, due: dueText(sc, status),
+      return { p, pct: D.B10, status, why, flag: why[0] || '', bad: !!(fails || D.B9 || sc.late), compound: true, sc, due: dueText(sc, status), fc: forecast(p, D.B10, status),
         now: `${unitCount(p, D.B3)} · المكتمل ${num(D.B4)} · الجاري ${num(D.B5)}`, curKey: null };
     }
     const sp = stageProgress(p);
@@ -471,7 +503,7 @@
     const now = sp.status === 'done' ? 'اكتملت كل المراحل' : sp.cur
       ? `${sp.cur.s.status === 'in_progress' ? 'الآن' : 'التالية'}: ${sp.cur.c.name_ar} (${num(sp.cur.c.position)} من ${num(state.checkpoints.length)})` : '—';
     const flag = sc.late ? `متأخر ${daysAr(-sc.daysLeft)}` : sc.behind ? 'متأخر عن الجدول' : why.length ? 'متوقف' : '';
-    return { p, pct: sp.pct, status: sp.status, why, flag, bad: sc.late, compound: false, now, curKey: sp.status === 'done' ? null : sp.cur?.c.key, sp, sc, due: dueText(sc, sp.status) };
+    return { p, pct: sp.pct, status: sp.status, why, flag, bad: sc.late, compound: false, now, fc: forecast(p, sp.pct, sp.status), curKey: sp.status === 'done' ? null : sp.cur?.c.key, sp, sc, due: dueText(sc, sp.status) };
   }
 
   /* ==========================================================
@@ -484,7 +516,7 @@
   const ringStyle = (pct) => ({ '--p': String(Math.round((pct || 0) * 100)) });
 
   async function homeFeed() {
-    await Promise.all(state.projects.filter(isCompound).map((p) => loadProject(p.id)));
+    await Promise.all([...state.projects.filter(isCompound).map((p) => loadProject(p.id)), window.Tasks ? window.Tasks.ensure() : null]);
     const openList = (patch) => { state._pf = { ...PF_DEFAULT, ...patch }; go('projects'); };
     const rows = state.projects.map(projInfo);
     const by = (st) => rows.filter((r) => r.status === st).length;
@@ -559,10 +591,12 @@
 
     // ---- المواعيد القادمة
     const dues = rows.filter((r) => r.sc?.has && r.status !== 'done').sort((a, b) => a.sc.daysLeft - b.sc.daysLeft);
-    const duesCard = h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'المواعيد القادمة')),
+    const duesCard = h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'المواعيد القادمة'),
+      h('a', { href: '#/calendar', class: 'link small' }, 'تقويم المواعيد')),
       dues.length ? h('ol', { class: 'feed-list' }, dues.slice(0, 6).map((r) => h('li', null, h('a', { href: '#/project/' + r.p.id, class: 'fl-row' },
         h('span', { class: 'day-pill ' + (r.sc.late ? 'bad' : r.sc.behind ? 'warn' : '') }, h('b', null, num(Math.abs(r.sc.daysLeft))), h('small', null, r.sc.late ? 'متأخر' : 'يوم')),
-        h('span', { class: 'fl-main' }, h('b', null, r.p.client), h('small', null, r.due)),
+        h('span', { class: 'fl-main' }, h('b', null, r.p.client), h('small', null, r.due),
+          r.fc && r.fc.diff !== null ? h('small', { class: 'due-fc' + (r.fc.diff < 0 ? ' late' : ''), title: forecastText(r.fc) }, forecastText(r.fc, true)) : null),
         h('span', { class: 'mini-pct' }, pctText(r.pct))))))
         : h('p', { class: 'calm muted' }, 'لا توجد مشاريع بتاريخ تسليم. أضفه من "بيانات المشروع".'));
 
@@ -603,12 +637,16 @@
       return d;
     };
     const reqs = window.Reports ? window.Reports.homeBox() : null;
+    const tasksBox = window.Tasks ? window.Tasks.homeBox() : null;
+    const insights = window.Insights ? window.Insights.homeBoxes(rows) : null;
     const main = h('div', { class: 'feed-main' },
       attn.length ? h('section', { class: 'feed-sec' }, h('h2', { class: 'sec-t' }, 'تحتاج انتباهك'), attn.slice(0, 6).map(attnCard),
         attn.length > 6 ? h('button', { type: 'button', class: 'btn block', onClick: () => openList({ st: 'attn' }) }, `عرض الكل (${num(attn.length)})`) : null)
         : rows.length ? h('section', { class: 'fc calm-card' }, h('b', null, '👌 كل شيء على ما يرام'), h('p', { class: 'muted' }, 'لا مشاريع متأخرة أو متوقفة الآن.')) : null,
       reqs ? h('div', { class: 'fc fc-wrap' }, reqs) : null,
-      todayCard);
+      tasksBox ? h('div', { class: 'fc fc-wrap' }, tasksBox) : null,
+      todayCard,
+      insights ? h('div', { class: 'fc fc-wrap' }, insights) : null);
     const side = h('div', { class: 'feed-side' },
       h('section', { class: 'fc avg-card' }, h('span', { class: 'st-ring lg', style: ringStyle(avg) }, h('span', { class: 'st-face' }, h('b', null, pctText(avg)))),
         h('div', null, h('b', null, 'متوسط الإنجاز'), h('small', { class: 'muted' }, P(rows.length)))),
@@ -617,7 +655,10 @@
       fold(crewsCard), fold(groupsCard));
 
     return h('div', { class: 'feed' },
-      h('header', { class: 'feed-hello' }, h('h1', null, hello), h('p', null, lead)),
+      h('header', { class: 'feed-hello' }, h('h1', null, hello), h('p', null, lead),
+        window.Plan && isStaff() && rows.length ? h('div', { class: 'row d2-lead-act' },
+          h('button', { type: 'button', class: 'btn sm', onClick: () => window.Plan.brief() }, 'ملخّص الصباح'),
+          h('a', { href: '#/calendar', class: 'btn ghost sm' }, 'تقويم المواعيد')) : null),
       stories, stats,
       h('div', { class: 'feed-grid' }, main, side));
   }
@@ -975,7 +1016,10 @@
 
       const out = h('div', { class: 'dash2 home' },
         h('header', { class: 'd2-head' },
-          h('p', { class: 'd2-lead' }, lead),
+          h('div', { class: 'd2-lead-box' }, h('p', { class: 'd2-lead' }, lead),
+          window.Plan && isStaff() && rows.length ? h('div', { class: 'row d2-lead-act' },
+            h('button', { type: 'button', class: 'btn sm', onClick: () => window.Plan.brief() }, 'ملخّص الصباح'),
+            h('a', { href: '#/calendar', class: 'btn ghost sm' }, 'تقويم المواعيد')) : null),
           h('div', { class: 'd2-pct' }, h('strong', null, pctText(overall)), h('span', null, scope === 'compounds' ? 'من فحوصات المجمّعات منجزة' : 'من فحوصات كل المشاريع منجزة'))),
         compBanner,
         h('dl', { class: 'd2-stats' }, [
@@ -1444,7 +1488,8 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, unitCount, loadCrewUnits, nameKey: norm, isAdmin, isStaff, MAP_URL, initials, ringStyle, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, unitCount, loadCrewUnits, nameKey: norm, isAdmin, isStaff, MAP_URL, initials, ringStyle, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText,
+    projInfo, forecast, forecastText, addDays, todayStr, dayDiff, STALL_DAYS, DAY };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => { pullToRefresh(); sheetDrag(); boot().catch(fail); });

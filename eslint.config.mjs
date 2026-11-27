@@ -9,7 +9,7 @@ const browser = {
   CompressionStream: 'readonly', DecompressionStream: 'readonly', Response: 'readonly', createImageBitmap: 'readonly',
   OffscreenCanvas: 'readonly', alert: 'readonly', confirm: 'readonly', history: 'readonly', matchMedia: 'readonly', self: 'readonly',
   caches: 'readonly', globalThis: 'readonly', module: 'writable', Uint8Array: 'readonly', Uint32Array: 'readonly', DataView: 'readonly',
-  performance: 'readonly', DOMParser: 'readonly', XMLSerializer: 'readonly'
+  performance: 'readonly', DOMParser: 'readonly', XMLSerializer: 'readonly', atob: 'readonly', btoa: 'readonly', Notification: 'readonly'
 };
 const rules = {
   'no-undef': 'error',

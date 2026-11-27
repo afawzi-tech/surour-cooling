@@ -1024,6 +1024,439 @@ revoke execute on function public.set_unit_checks(jsonb) from public, anon;
 grant execute on function public.set_unit_checks(jsonb) to authenticated;
 
 -- ==========================================================
+-- مهام المشروع (فكرة من TaskFlow): مهمة لها عنوان ومسؤول (فني) وموعد وأولوية،
+-- وقد ترتبط بمرحلة. المدير والمشرف ينشئونها ويعدّلونها ويحرّكونها مباشرة.
+-- الفني لا يعدّل المهمة: يرسل تقريراً (بدأت/أنجزت) عن مهمة مسندة له، ويطبَّق بعد الموافقة.
+-- ==========================================================
+create table if not exists public.project_tasks (
+  id           uuid primary key default gen_random_uuid(),
+  project_id   uuid not null references public.projects (id) on delete cascade,
+  checkpoint   text references public.qc_checkpoints (key),
+  title        text not null check (char_length(btrim(title)) between 1 and 200),
+  details      text check (char_length(details) <= 2000),
+  priority     text not null default 'normal' check (priority in ('urgent', 'high', 'normal')),
+  status       text not null default 'todo' check (status in ('todo', 'in_progress', 'done')),
+  assignee     uuid references public.profiles (id) on delete set null,
+  due_date     date,
+  position     double precision not null default 0,
+  started_at   timestamptz,
+  done_at      timestamptz,
+  created_by   uuid references public.profiles (id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+create index if not exists project_tasks_project_idx on public.project_tasks (project_id, status, position);
+create index if not exists project_tasks_assignee_idx on public.project_tasks (assignee) where status <> 'done';
+
+-- أوقات البدء والإنجاز تُملأ على الخادم عند تغيّر الحالة، والمنشئ لا يتغيّر
+create or replace function public.project_task_stamp()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  new.title := btrim(new.title);
+  new.details := nullif(btrim(new.details), '');
+  new.updated_at := now();
+  if tg_op = 'INSERT' then
+    new.created_by := auth.uid(); new.created_at := now();
+  else
+    new.created_by := old.created_by; new.created_at := old.created_at;
+  end if;
+  if new.status = 'todo' then new.started_at := null; new.done_at := null;
+  elsif new.status = 'in_progress' then
+    new.started_at := coalesce(case when tg_op = 'UPDATE' then old.started_at end, now()); new.done_at := null;
+  else
+    new.started_at := coalesce(case when tg_op = 'UPDATE' then old.started_at end, now());
+    new.done_at := coalesce(case when tg_op = 'UPDATE' and old.status = 'done' then old.done_at end, now());
+  end if;
+  return new;
+end $$;
+drop trigger if exists project_tasks_stamp on public.project_tasks;
+create trigger project_tasks_stamp before insert or update on public.project_tasks
+  for each row execute function public.project_task_stamp();
+drop trigger if exists audit_project_tasks on public.project_tasks;
+create trigger audit_project_tasks after insert or update or delete on public.project_tasks
+  for each row execute function public.write_audit();
+
+alter table public.project_tasks enable row level security;
+revoke all on public.project_tasks from anon;
+grant select, insert, update, delete on public.project_tasks to authenticated;
+drop policy if exists tasks_select on public.project_tasks;
+create policy tasks_select on public.project_tasks for select to authenticated using ((select public.app_role()) is not null);
+drop policy if exists tasks_insert on public.project_tasks;
+create policy tasks_insert on public.project_tasks for insert to authenticated with check ((select public.is_staff()));
+drop policy if exists tasks_update on public.project_tasks;
+create policy tasks_update on public.project_tasks for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
+drop policy if exists tasks_delete on public.project_tasks;
+create policy tasks_delete on public.project_tasks for delete to authenticated using ((select public.is_staff()));
+
+-- تقرير الفني عن مهمة: بدأت أو أُنجزت، مع ملاحظة وصورة اختيارية (في مخزن stage-photos نفسه)
+create table if not exists public.task_requests (
+  id            uuid primary key default gen_random_uuid(),
+  task_id       uuid not null references public.project_tasks (id) on delete cascade,
+  action        text not null check (action in ('start', 'done')),
+  note          text check (char_length(note) <= 1000),
+  photo_path    text check (char_length(photo_path) <= 200),
+  status        text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  requested_by  uuid references public.profiles (id) on delete set null default auth.uid(),
+  requested_at  timestamptz not null default now(),
+  reviewed_by   uuid references public.profiles (id) on delete set null,
+  reviewed_at   timestamptz,
+  review_note   text check (char_length(review_note) <= 500)
+);
+create unique index if not exists task_requests_one_pending on public.task_requests (task_id) where status = 'pending';
+
+create or replace function public.task_request_check()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare t public.project_tasks; me uuid := auth.uid();
+begin
+  new.requested_by := me; new.requested_at := now(); new.status := 'pending';
+  new.reviewed_by := null; new.reviewed_at := null; new.review_note := null;
+  new.note := nullif(btrim(new.note), '');
+  select * into t from public.project_tasks where id = new.task_id;
+  if not found or public.app_role() is null or t.assignee is distinct from me then
+    raise exception 'هذه المهمة غير مسندة لك' using errcode = '42501';
+  end if;
+  if new.action = 'start' and t.status <> 'todo' then raise exception 'المهمة بدأت من قبل';
+  elsif new.action = 'done' and t.status = 'done' then raise exception 'المهمة منجزة';
+  end if;
+  if new.photo_path is not null and new.photo_path !~ ('^' || t.project_id::text || '/' || me::text || '/[0-9a-f-]{36}\.(jpg|png|webp)$') then
+    raise exception 'مسار الصورة غير صالح';
+  end if;
+  return new;
+end $$;
+drop trigger if exists task_requests_check on public.task_requests;
+create trigger task_requests_check before insert on public.task_requests
+  for each row execute function public.task_request_check();
+drop trigger if exists audit_task_requests on public.task_requests;
+create trigger audit_task_requests after insert or update or delete on public.task_requests
+  for each row execute function public.write_audit();
+
+create or replace function public.review_task_request(req uuid, approve boolean, reason text default null)
+returns public.task_requests language plpgsql security definer set search_path = public as $$
+declare r public.task_requests;
+begin
+  if not coalesce(public.is_staff(), false) then raise exception 'المراجعة للمدير والمشرف فقط' using errcode = '42501'; end if;
+  select * into r from public.task_requests where id = req for update;
+  if not found then raise exception 'الطلب غير موجود'; end if;
+  if r.status <> 'pending' then raise exception 'هذا الطلب رُوجع من قبل'; end if;
+  reason := nullif(btrim(reason), '');
+  if not approve and reason is null then raise exception 'اكتب سبب الرفض'; end if;
+  if approve then
+    update public.project_tasks set status = case when r.action = 'start' then 'in_progress' else 'done' end
+    where id = r.task_id and status <> 'done' and (r.action = 'done' or status = 'todo');
+  end if;
+  update public.task_requests set status = case when approve then 'approved' else 'rejected' end,
+    reviewed_by = auth.uid(), reviewed_at = now(), review_note = left(reason, 500)
+  where id = req returning * into r;
+  return r;
+end $$;
+
+alter table public.task_requests enable row level security;
+revoke all on public.task_requests from anon;
+grant select, insert, delete on public.task_requests to authenticated;
+revoke execute on function public.project_task_stamp(), public.task_request_check(), public.review_task_request(uuid, boolean, text) from public, anon;
+grant execute on function public.review_task_request(uuid, boolean, text) to authenticated;
+drop policy if exists task_requests_select on public.task_requests;
+create policy task_requests_select on public.task_requests for select to authenticated using ((select public.app_role()) is not null);
+drop policy if exists task_requests_insert on public.task_requests;
+create policy task_requests_insert on public.task_requests for insert to authenticated with check ((select public.app_role()) is not null and requested_by = (select auth.uid()));
+drop policy if exists task_requests_delete on public.task_requests;
+create policy task_requests_delete on public.task_requests for delete to authenticated
+  using ((requested_by = (select auth.uid()) and status = 'pending') or (select public.is_admin()));
+
+-- ==========================================================
+-- التعليقات، والإشعارات (داخل التطبيق وعلى الموبايل)، ومرفقات المشروع — أفكار من TaskFlow
+-- ==========================================================
+
+-- ---------- التعليقات: على المشروع أو على مهمة، مع إشارة @ لأشخاص ----------
+create table if not exists public.comments (
+  id          uuid primary key default gen_random_uuid(),
+  project_id  uuid not null references public.projects (id) on delete cascade,
+  task_id     uuid references public.project_tasks (id) on delete cascade,
+  body        text not null check (char_length(btrim(body)) between 1 and 2000),
+  mentions    uuid[] not null default '{}' check (cardinality(mentions) <= 20),
+  author      uuid references public.profiles (id) on delete set null default auth.uid(),
+  created_at  timestamptz not null default now(),
+  edited_at   timestamptz
+);
+create index if not exists comments_project_idx on public.comments (project_id, created_at);
+create index if not exists comments_task_idx on public.comments (task_id, created_at) where task_id is not null;
+
+create or replace function public.comment_stamp()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  new.body := btrim(new.body);
+  -- الإشارات: أشخاص مفعّلون فقط، بلا تكرار، وليس الكاتب نفسه
+  new.mentions := coalesce((select array_agg(distinct m) from unnest(new.mentions) m
+                            join public.profiles p on p.id = m and p.active where m <> auth.uid()), '{}');
+  if tg_op = 'INSERT' then
+    new.author := auth.uid(); new.created_at := now(); new.edited_at := null;
+    if new.task_id is not null and not exists (select 1 from public.project_tasks t where t.id = new.task_id and t.project_id = new.project_id) then
+      raise exception 'المهمة ليست في هذا المشروع';
+    end if;
+  else
+    new.author := old.author; new.created_at := old.created_at; new.project_id := old.project_id; new.task_id := old.task_id;
+    new.edited_at := now();
+  end if;
+  return new;
+end $$;
+drop trigger if exists comments_stamp on public.comments;
+create trigger comments_stamp before insert or update on public.comments
+  for each row execute function public.comment_stamp();
+drop trigger if exists audit_comments on public.comments;
+create trigger audit_comments after insert or update or delete on public.comments
+  for each row execute function public.write_audit();
+
+alter table public.comments enable row level security;
+revoke all on public.comments from anon;
+grant select, insert, update, delete on public.comments to authenticated;
+drop policy if exists comments_select on public.comments;
+create policy comments_select on public.comments for select to authenticated using ((select public.app_role()) is not null);
+drop policy if exists comments_insert on public.comments;
+create policy comments_insert on public.comments for insert to authenticated with check ((select public.app_role()) is not null and author = (select auth.uid()));
+drop policy if exists comments_update on public.comments;
+create policy comments_update on public.comments for update to authenticated using (author = (select auth.uid()) and (select public.app_role()) is not null) with check (author = (select auth.uid()));
+drop policy if exists comments_delete on public.comments;
+create policy comments_delete on public.comments for delete to authenticated using (author = (select auth.uid()) or (select public.is_admin()));
+
+-- ---------- الإشعارات ----------
+-- تُنشأ على الخادم فقط (من المشغّلات أدناه). كل مستخدم يرى إشعاراته ويعلّمها مقروءة.
+create table if not exists public.notifications (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.profiles (id) on delete cascade,
+  actor       uuid references public.profiles (id) on delete set null,
+  kind        text not null,
+  title       text not null,
+  body        text,
+  link        text check (link ~ '^#/'),
+  read_at     timestamptz,
+  created_at  timestamptz not null default now()
+);
+create index if not exists notifications_user_idx on public.notifications (user_id, created_at desc);
+
+alter table public.notifications enable row level security;
+revoke all on public.notifications from anon;
+grant select, delete on public.notifications to authenticated;
+grant update (read_at) on public.notifications to authenticated;
+drop policy if exists notifications_select on public.notifications;
+create policy notifications_select on public.notifications for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists notifications_update on public.notifications;
+create policy notifications_update on public.notifications for update to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+drop policy if exists notifications_delete on public.notifications;
+create policy notifications_delete on public.notifications for delete to authenticated using (user_id = (select auth.uid()));
+
+-- اشتراكات الموبايل (Web Push): كل جهاز يسجّل اشتراكه
+create table if not exists public.push_subscriptions (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.profiles (id) on delete cascade default auth.uid(),
+  endpoint    text not null unique check (endpoint ~ '^https://' and char_length(endpoint) <= 1000),
+  p256dh      text not null check (char_length(p256dh) <= 200),
+  auth        text not null check (char_length(auth) <= 100),
+  device      text check (char_length(device) <= 200),
+  created_at  timestamptz not null default now()
+);
+alter table public.push_subscriptions enable row level security;
+revoke all on public.push_subscriptions from anon;
+grant select, insert, delete on public.push_subscriptions to authenticated;
+drop policy if exists push_select on public.push_subscriptions;
+create policy push_select on public.push_subscriptions for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists push_insert on public.push_subscriptions;
+create policy push_insert on public.push_subscriptions for insert to authenticated with check (user_id = (select auth.uid()) and (select public.app_role()) is not null);
+drop policy if exists push_delete on public.push_subscriptions;
+create policy push_delete on public.push_subscriptions for delete to authenticated using (user_id = (select auth.uid()));
+
+-- أسرار داخلية للخادم فقط (لا يقرؤها أي مستخدم): مفاتيح VAPID ورمز استدعاء دالة الإرسال
+create table if not exists public.app_secrets (
+  key    text primary key,
+  value  text not null
+);
+alter table public.app_secrets enable row level security;
+revoke all on public.app_secrets from anon, authenticated;
+grant select, insert, update on public.app_secrets to service_role;
+insert into public.app_secrets (key, value) values ('push_hook_token', encode(gen_random_bytes(24), 'hex')) on conflict (key) do nothing;
+
+-- عنوان دالة الإرسال (يُضبط مرة واحدة بعد نشرها)
+insert into public.app_secrets (key, value) values ('push_fn_url', '') on conflict (key) do nothing;
+
+-- إنشاء إشعار، ثم طلب إرساله للموبايل عبر دالة push-send (إن كانت pg_net والدالة جاهزتين)
+create or replace function public.notify(p_user uuid, p_kind text, p_title text, p_body text, p_link text)
+returns void language plpgsql security definer set search_path = public as $$
+declare n uuid; u text; tok text;
+begin
+  if p_user is null or p_user = auth.uid() then return; end if;
+  if not exists (select 1 from public.profiles where id = p_user and active) then return; end if;
+  insert into public.notifications (user_id, actor, kind, title, body, link)
+  values (p_user, auth.uid(), p_kind, left(p_title, 200), left(p_body, 500), p_link) returning id into n;
+  select value into u from public.app_secrets where key = 'push_fn_url';
+  select value into tok from public.app_secrets where key = 'push_hook_token';
+  if coalesce(u, '') <> '' and exists (select 1 from pg_extension where extname = 'pg_net')
+     and exists (select 1 from public.push_subscriptions where user_id = p_user) then
+    begin
+      execute 'select net.http_post(url := $1, body := $2, headers := $3)'
+        using u, jsonb_build_object('id', n), jsonb_build_object('Content-Type', 'application/json', 'x-hook-token', tok);
+    exception when others then null;   -- فشل الإرسال للموبايل لا يمنع الإشعار داخل التطبيق
+    end;
+  end if;
+end $$;
+
+create or replace function public.notify_staff(p_kind text, p_title text, p_body text, p_link text)
+returns void language plpgsql security definer set search_path = public as $$
+declare s uuid;
+begin
+  for s in select id from public.profiles where active and role in ('admin', 'supervisor') loop
+    perform public.notify(s, p_kind, p_title, p_body, p_link);
+  end loop;
+end $$;
+
+create or replace function public.person_name(p uuid)
+returns text language sql stable security definer set search_path = public as $$
+  select coalesce(nullif(full_name, ''), 'مستخدم') from public.profiles where id = p
+$$;
+
+-- تقارير المراحل: جديد ← المدير والمشرف، ومراجعة ← الفني
+create or replace function public.stage_request_notify()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare pj text; cp text;
+begin
+  select client into pj from public.projects where id = new.project_id;
+  select name_ar into cp from public.qc_checkpoints where key = new.checkpoint;
+  if tg_op = 'INSERT' then
+    perform public.notify_staff('stage_request', 'تقرير مرحلة بانتظار موافقتك',
+      public.person_name(new.requested_by) || ': ' || case when new.action = 'start' then 'بدأت ' else 'اكتملت ' end || cp || ' · ' || pj,
+      '#/project/' || new.project_id);
+  elsif old.status = 'pending' and new.status <> 'pending' then
+    perform public.notify(new.requested_by, 'stage_review',
+      case when new.status = 'approved' then 'وافق المشرف على تقريرك' else 'رُفض تقريرك' end,
+      cp || ' · ' || pj || coalesce(' · ' || new.review_note, ''), '#/project/' || new.project_id);
+  end if;
+  return null;
+end $$;
+drop trigger if exists stage_requests_notify on public.stage_requests;
+create trigger stage_requests_notify after insert or update on public.stage_requests
+  for each row execute function public.stage_request_notify();
+
+-- المهام: إسناد ← المسؤول، تقرير ← المدير والمشرف، مراجعة ← الفني
+create or replace function public.project_task_notify()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare pj text;
+begin
+  select client into pj from public.projects where id = new.project_id;
+  if new.assignee is not null and (tg_op = 'INSERT' or new.assignee is distinct from old.assignee) and new.status <> 'done' then
+    perform public.notify(new.assignee, 'task_assigned', 'انسندت لك مهمة',
+      new.title || ' · ' || pj || coalesce(' · الموعد ' || new.due_date::text, ''), '#/tasks');
+  end if;
+  return null;
+end $$;
+drop trigger if exists project_tasks_notify on public.project_tasks;
+create trigger project_tasks_notify after insert or update on public.project_tasks
+  for each row execute function public.project_task_notify();
+
+create or replace function public.task_request_notify()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare t public.project_tasks;
+begin
+  select * into t from public.project_tasks where id = new.task_id;
+  if tg_op = 'INSERT' then
+    perform public.notify_staff('task_request', 'تقرير مهمة بانتظار موافقتك',
+      public.person_name(new.requested_by) || ': ' || case when new.action = 'start' then 'بدأ ' else 'أنجز ' end || t.title, '#/tasks');
+  elsif old.status = 'pending' and new.status <> 'pending' then
+    perform public.notify(new.requested_by, 'task_review',
+      case when new.status = 'approved' then 'وافق المشرف على تقرير المهمة' else 'رُفض تقرير المهمة' end,
+      t.title || coalesce(' · ' || new.review_note, ''), '#/tasks');
+  end if;
+  return null;
+end $$;
+drop trigger if exists task_requests_notify on public.task_requests;
+create trigger task_requests_notify after insert or update on public.task_requests
+  for each row execute function public.task_request_notify();
+
+-- التعليقات: المذكورون بـ@، ومسؤول المهمة إن كان التعليق عليها
+create or replace function public.comment_notify()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare pj text; m uuid; t public.project_tasks; link text; who text := public.person_name(new.author);
+begin
+  select client into pj from public.projects where id = new.project_id;
+  link := case when new.task_id is not null then '#/tasks' else '#/project/' || new.project_id || '/talk' end;
+  foreach m in array new.mentions loop
+    perform public.notify(m, 'mention', who || ' ذكرك', pj || ': ' || left(new.body, 160), link);
+  end loop;
+  if new.task_id is not null then
+    select * into t from public.project_tasks where id = new.task_id;
+    if t.assignee is not null and not (t.assignee = any (new.mentions)) then
+      perform public.notify(t.assignee, 'task_comment', who || ' علّق على مهمتك', t.title || ': ' || left(new.body, 160), link);
+    end if;
+  end if;
+  return null;
+end $$;
+drop trigger if exists comments_notify on public.comments;
+create trigger comments_notify after insert on public.comments
+  for each row execute function public.comment_notify();
+
+revoke execute on function public.notify(uuid, text, text, text, text), public.notify_staff(text, text, text, text), public.person_name(uuid),
+  public.stage_request_notify(), public.project_task_notify(), public.task_request_notify(), public.comment_notify(), public.comment_stamp() from public, anon, authenticated;
+
+-- ---------- مرفقات المشروع: العقد، المخططات، صور الموقع ----------
+create table if not exists public.project_files (
+  id           uuid primary key default gen_random_uuid(),
+  project_id   uuid not null references public.projects (id) on delete cascade,
+  path         text not null unique check (char_length(path) <= 300),
+  name         text not null check (char_length(name) between 1 and 200),
+  kind         text not null default 'other' check (kind in ('contract', 'drawing', 'photo', 'other')),
+  mime         text check (char_length(mime) <= 100),
+  size         bigint check (size >= 0),
+  staff_only   boolean not null default false,
+  uploaded_by  uuid references public.profiles (id) on delete set null default auth.uid(),
+  created_at   timestamptz not null default now()
+);
+create index if not exists project_files_project_idx on public.project_files (project_id, created_at desc);
+
+create or replace function public.project_file_stamp()
+returns trigger language plpgsql set search_path = public as $$
+begin
+  if tg_op = 'INSERT' then
+    new.uploaded_by := auth.uid(); new.created_at := now();
+    if new.path !~ ('^' || new.project_id::text || '/[0-9a-f-]{36}\.[a-z0-9]{1,8}$') then raise exception 'مسار الملف غير صالح'; end if;
+  else
+    new.path := old.path; new.project_id := old.project_id; new.uploaded_by := old.uploaded_by; new.created_at := old.created_at;
+  end if;
+  return new;
+end $$;
+drop trigger if exists project_files_stamp on public.project_files;
+create trigger project_files_stamp before insert or update on public.project_files
+  for each row execute function public.project_file_stamp();
+drop trigger if exists audit_project_files on public.project_files;
+create trigger audit_project_files after insert or update or delete on public.project_files
+  for each row execute function public.write_audit();
+
+alter table public.project_files enable row level security;
+revoke all on public.project_files from anon;
+grant select, insert, update, delete on public.project_files to authenticated;
+-- الفني لا يرى الملفات المعلّمة "للإدارة فقط"
+drop policy if exists files_select on public.project_files;
+create policy files_select on public.project_files for select to authenticated
+  using ((select public.app_role()) is not null and (not staff_only or (select public.is_staff())));
+drop policy if exists files_insert on public.project_files;
+create policy files_insert on public.project_files for insert to authenticated with check ((select public.is_staff()));
+drop policy if exists files_update on public.project_files;
+create policy files_update on public.project_files for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
+drop policy if exists files_delete on public.project_files;
+create policy files_delete on public.project_files for delete to authenticated using ((select public.is_staff()));
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('project-files', 'project-files', false, 20971520, array['application/pdf', 'image/jpeg', 'image/png', 'image/webp',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+-- قراءة الملف من المخزن بنفس شرط جدول المرفقات (الحماية على الخادم، لا في الواجهة)
+drop policy if exists project_files_read on storage.objects;
+create policy project_files_read on storage.objects for select to authenticated
+  using (bucket_id = 'project-files' and exists (select 1 from public.project_files f where f.path = storage.objects.name and (not f.staff_only or (select public.is_staff())) and (select public.app_role()) is not null));
+drop policy if exists project_files_write on storage.objects;
+create policy project_files_write on storage.objects for insert to authenticated
+  with check (bucket_id = 'project-files' and (select public.is_staff()));
+drop policy if exists project_files_remove on storage.objects;
+create policy project_files_remove on storage.objects for delete to authenticated
+  using (bucket_id = 'project-files' and (select public.is_staff()));
+
+-- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:
 --   update public.profiles set role = 'admin'
 --   where id = (select id from auth.users where email = 'you@example.com');

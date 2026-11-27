@@ -49,7 +49,15 @@ const TABLES = {
   stage_requests: [{ id: '50000000-0000-0000-0000-000000000001', project_id: ids.p1, checkpoint: 'equipment_set', action: 'start', status: 'pending',
     requested_by: ids.tech, requested_at: day(-1) }],
   unit_checks: [], audit_log: [{ id: 1, at: day(-1), actor: ids.admin, table_name: 'projects', action: 'UPDATE', new_data: { client: 'بيت الاختبار' } }],
-  backups: [{ id: 1, taken_at: day(0), kind: 'auto', counts: { projects: 2 }, size_bytes: 20480 }]
+  backups: [{ id: 1, taken_at: day(0), kind: 'auto', counts: { projects: 2 }, size_bytes: 20480 }],
+  project_tasks: [{ id: '60000000-0000-0000-0000-000000000001', project_id: ids.p1, title: 'جلب مواد', priority: 'urgent', status: 'todo',
+    assignee: ids.tech, due_date: day(1), position: 1, created_at: day(-2), updated_at: day(-2) }],
+  task_requests: [], comments: [{ id: '70000000-0000-0000-0000-000000000001', project_id: ids.p1, task_id: null, body: 'المواد ناقصة',
+    mentions: [ids.admin], author: ids.tech, created_at: day(-1) }],
+  notifications: [{ id: '80000000-0000-0000-0000-000000000001', user_id: ids.admin, kind: 'mention', title: 'فني تجربة ذكرك', body: 'المواد ناقصة',
+    link: '#/project/' + ids.p1 + '/talk', read_at: null, created_at: day(-1) }],
+  push_subscriptions: [], project_files: [{ id: '90000000-0000-0000-0000-000000000001', project_id: ids.p1, path: ids.p1 + '/a.pdf', name: 'العقد.pdf',
+    kind: 'contract', size: 1000, staff_only: false, uploaded_by: ids.admin, created_at: day(-3) }]
 };
 const RPC = {
   tech_performance: people.map((p) => ({ user_id: p.id, full_name: p.full_name, role: p.role, active: true, crew_id: p.crew_id,
@@ -91,7 +99,8 @@ async function session(page, who) {
 
 const ROUTES = ['home', 'projects', 'compounds', 'crews', 'techs', `techs/${ids.tech}`, 'reports', 'users', 'audit', 'backup',
   `project/${ids.p1}`, `project/${ids.p1}/settings`, `project/${ids.p2}`, `project/${ids.p2}/tracker`, `project/${ids.p2}/tests`,
-  `project/${ids.p2}/ncr`, `project/${ids.p2}/guide`, `project/${ids.p2}/villa/${units[1].id}`];
+  `project/${ids.p2}/ncr`, `project/${ids.p2}/guide`, `project/${ids.p2}/villa/${units[1].id}`,
+  'calendar', 'tasks', 'notifications', `project/${ids.p1}/tasks`, `project/${ids.p1}/talk`, `project/${ids.p1}/files`];
 
 const browser = await chromium.launch();
 const problems = [];

@@ -130,6 +130,7 @@
     const tel = (x) => 'tel:' + String(x).replace(/[^0-9+]/g, '');
     const safeMap = p.map_url && A.MAP_URL.test(p.map_url) ? p.map_url : null;
     const idle = sp.status === 'in_progress' && sp.last ? daysAgo(sp.last.slice(0, 10)) : 0;
+    const fc = A.forecast(p, sp.pct, sp.status);
     const why = [sc.late ? `فات موعد التسليم بـ${A.daysAr(-sc.daysLeft)}` : '', !sc.late && sc.behind ? ['متأخر عن الجدول: أُنجز ', A.pctText(sp.pct), ' والمتوقع ', A.pctText(sc.expected)] : '',
       idle >= 14 && cur ? `المرحلة الحالية "${cur.c.name_ar}" لم تتحرك منذ ${A.daysAr(idle)}` : ''].filter((x) => x && x.length);
     return h('header', { class: 'phead' + (sc.late ? ' bad' : why.length ? ' warn' : '') },
@@ -139,6 +140,8 @@
         h('div', { class: 'phead-t' }, h('h1', null, p.client), meta ? h('p', null, meta) : null,
           p.customer_name ? h('p', { class: 'phead-cust' }, 'العميل: ', p.customer_name) : null)),
       why.length ? h('div', { class: 'phead-why', role: 'status' }, why.map((w) => h('p', null, w))) : null,
+      fc ? h('p', { class: 'fc-note' + (fc.diff !== null && fc.diff < 0 ? ' late' : fc.diff > 0 ? ' early' : '') },
+        A.forecastText(fc) + '.', h('small', null, ` (${fc.actual ? 'من بدء العمل الفعلي' : 'من البدء المخطط'} ${fc.start}: ${A.daysAr(fc.elapsed)} لإنجاز ${A.pctText(sp.pct)})`)) : null,
       h('div', { class: 'phead-acts' },
         crew?.phone ? h('a', { href: tel(crew.phone), class: 'pill-btn' }, '📞 ', crew.name) : null,
         p.customer_phone ? h('a', { href: tel(p.customer_phone), class: 'pill-btn' }, '📞 العميل') : null,
@@ -147,14 +150,17 @@
   }
 
   function stagesProject(p, r) {
-    const tab = r.tab === 'settings' ? 'settings' : 'stages';
+    const TABS = [['stages', 'المراحل'], window.Tasks ? ['tasks', 'المهام'] : null, window.Collab ? ['talk', 'النقاش'] : null,
+      window.Collab ? ['files', 'الملفات'] : null, ['settings', 'البيانات']].filter(Boolean);
+    const tab = TABS.some(([k]) => k === r.tab) ? r.tab : 'stages';
     const sp = A.stageProgress(p);
     return h('div', { class: 'book stages-book' },
       projectHead(p, sp),
       h('nav', { class: 'seg-tabs', 'aria-label': 'أقسام المشروع' },
-        [['stages', 'مراحل العمل'], ['settings', 'بيانات المشروع']].map(([k, l]) =>
+        TABS.map(([k, l]) =>
           h('a', { href: `#/project/${p.id}/${k}`, class: k === tab ? 'on' : '', 'aria-current': k === tab ? 'page' : null }, l))),
-      h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : stagesSheet(p)),
+      h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : tab === 'tasks' ? window.Tasks.projectPanel(p)
+        : tab === 'talk' ? window.Collab.talkPanel(p) : tab === 'files' ? window.Collab.filesPanel(p) : stagesSheet(p)),
       // تفاصيل العميل والعقد مطوية تحت المراحل، حتى تبقى "المرحلة الحالية" أول ما يُرى
       tab === 'settings' ? null : clientCard(p, sp));
   }
