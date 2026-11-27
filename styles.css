@@ -1193,3 +1193,12 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 .chip.rq-st-chip.rejected { background: var(--danger-soft); color: var(--danger); }
 .rq-body .btn { margin-top: 4px; }
 @media (max-width: 760px) { .rq-card { grid-template-columns: 88px minmax(0, 1fr); } .rq-card .rq-photo, .rq-nophoto, .rq-card .rq-photo-wait { width: 88px; height: 88px; } }
+
+/* ---------- أداء الفنيين ---------- */
+.tp-period { max-width: 520px; }
+.tp-name { color: inherit; text-decoration: none; }
+.tp-name:hover b { color: var(--brand); }
+.tp-card .small { font-size: .85rem; }
+.tp-table tr.tp-fail td { background: var(--fail-bg); }
+@media (max-width: 640px) { .tp-card .perf { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 8px; } }
+.tp-code { white-space: nowrap; }

@@ -316,6 +316,7 @@
     users: ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M2 21c0-4 3-6 7-6s7 2 7 6', 'M17 4a3.5 3.5 0 0 1 0 7', 'M19 15c2 .6 3 2.5 3 6'],
     audit: ['M4 4h16v16H4z', 'M8 9h8', 'M8 13h8', 'M8 17h5'],
     backup: ['M12 3v12', 'M7 10l5 5 5-5', 'M4 19h16'],
+    techs: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
     reports: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M8 12l2.5 2.5L16 9', 'M8 18h8'],
     more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
   };
@@ -333,6 +334,7 @@
       ['home', 'لوحة التحكم', true],
       ['projects', 'المشاريع', true],
       ['crews', 'الفرق والمقاولون', true],
+      ['techs', isStaff() ? 'أداء الفنيين' : 'أدائي', true],
       ['compounds', 'المجمّعات السكنية', true],
       ['reports', 'سجل التقارير', true],
       ['users', 'المستخدمون', isAdmin()],
@@ -340,7 +342,7 @@
       ['backup', 'نسخة احتياطية', isStaff()]
     ].filter((x) => x[2]);
     const stay = (k) => (k === 'home' ? () => { state._stayHome = true; } : null);
-    const SHORT = { home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات' };
+    const SHORT = { home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات', techs: isStaff() ? 'الأداء' : 'أدائي' };
     const link = ([k, l]) => h('a', { href: '#/' + k, class: navOn === k ? 'on' : '', 'aria-current': navOn === k ? 'page' : null, onClick: stay(k), 'aria-label': l }, icon(k),
       h('span', { class: 'nl-full' }, l), SHORT[k] ? h('span', { class: 'nl-short', 'aria-hidden': 'true' }, SHORT[k]) : null);
     const me = h('div', { class: 'side-me' },
@@ -1342,6 +1344,7 @@
             ['الموافقة على تقارير الفنيين أو رفضها', 1, 1, 0],
             ['بدء المراحل وإكمالها وإسنادها لفرقة أو مقاول', 1, 1, 0],
             ['إضافة الفرق والمقاولين وتعديلهم', 1, 1, 0],
+            ['أداء كل الفنيين (الفني يرى أداءه فقط)', 1, 1, 0],
             ['نتائج فحص الفلل، وNCR، واستيراد Excel، والنسخة الاحتياطية', 1, 1, 0],
             ['حذف المشاريع والفرق، وإضافة المستخدمين، وسجل العمليات', 1, 0, 0]
           ].map(([a, ...c]) => h('tr', null, h('td', null, a), c.map((x) => h('td', { class: x ? 'yes' : 'no' }, x ? '✓' : '—')))))))));
