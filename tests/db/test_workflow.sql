@@ -17,15 +17,15 @@ select pg_temp.login(:'S');
 insert into public.project_stages (project_id, checkpoint, status, crew_id)
 values ('33333333-3333-3333-3333-333333333333', 'site_ready', 'in_progress', '11111111-1111-1111-1111-111111111111');
 select pg_temp.ok((select start_date = public.today_iq() and end_date is null and updated_by = :'S'
-  from public.project_stages where checkpoint = 'site_ready'), 'جارية تملأ تاريخ البدء ومن عدّل');
+  from public.project_stages where project_id = '33333333-3333-3333-3333-333333333333' and checkpoint = 'site_ready'), 'جارية تملأ تاريخ البدء ومن عدّل');
 insert into public.project_stages (project_id, checkpoint, status, crew_id)
 values ('33333333-3333-3333-3333-333333333333', 'piping', 'not_started', '22222222-2222-2222-2222-222222222222');
 reset role;
 
 -- ---- الفني: لا يعدّل المراحل مباشرة، ويبلّغ عن مراحل فرقته فقط ----
 select pg_temp.login(:'T');
-update public.project_stages set status = 'done' where checkpoint = 'site_ready';
-select pg_temp.ok((select status from public.project_stages where checkpoint = 'site_ready') = 'in_progress', 'الفني لم يعدّل المرحلة مباشرة');
+update public.project_stages set status = 'done' where project_id = '33333333-3333-3333-3333-333333333333' and checkpoint = 'site_ready';
+select pg_temp.ok((select status from public.project_stages where project_id = '33333333-3333-3333-3333-333333333333' and checkpoint = 'site_ready') = 'in_progress', 'الفني لم يعدّل المرحلة مباشرة');
 select pg_temp.expect_error($$insert into public.stage_requests (project_id, checkpoint, action) values ('33333333-3333-3333-3333-333333333333', 'piping', 'start')$$,
   'تقرير عن مرحلة فرقة أخرى');
 select pg_temp.expect_error($$insert into public.stage_requests (project_id, checkpoint, action) values ('33333333-3333-3333-3333-333333333333', 'site_ready', 'start')$$,
@@ -51,9 +51,9 @@ reset role;
 select pg_temp.login(:'S');
 select pg_temp.expect_error(format($$select public.review_stage_request(%L, false, '  ')$$, (select v from ids where k = 'req1')), 'رفض بلا سبب');
 select public.review_stage_request((select v from ids where k = 'req1'), true);
-select pg_temp.ok((select status = 'done' and end_date = public.today_iq() from public.project_stages where checkpoint = 'site_ready'), 'الموافقة تكمل المرحلة');
+select pg_temp.ok((select status = 'done' and end_date = public.today_iq() from public.project_stages where project_id = '33333333-3333-3333-3333-333333333333' and checkpoint = 'site_ready'), 'الموافقة تكمل المرحلة');
 select pg_temp.ok((select status = 'in_progress' and crew_id = '11111111-1111-1111-1111-111111111111'
-  from public.project_stages where checkpoint = 'equipment_set'), 'المرحلة التالية بدأت وبقيت مع الفرقة');
+  from public.project_stages where project_id = '33333333-3333-3333-3333-333333333333' and checkpoint = 'equipment_set'), 'المرحلة التالية بدأت وبقيت مع الفرقة');
 select pg_temp.expect_error(format($$select public.review_stage_request(%L, true)$$, (select v from ids where k = 'req1')), 'مراجعة الطلب مرتين');
 reset role;
 select pg_temp.ok((select count(*) from public.audit_log where table_name = 'stage_requests') >= 2, 'التقارير في سجل العمليات');
@@ -62,11 +62,11 @@ select pg_temp.ok((select count(*) from public.audit_log where table_name = 'sta
 insert into public.units (id, project_id, code) values ('44444444-4444-4444-4444-444444444444', '33333333-3333-3333-3333-333333333333', 'V-001');
 select pg_temp.login(:'T');
 insert into public.test_records (unit_id, start_mpa, end_mpa, vacuum_by) values ('44444444-4444-4444-4444-444444444444', 4.15, 4.14, :'A');
-select pg_temp.ok((select pressure_by = :'T' and vacuum_by is null from public.test_records), 'قسم الضغط باسم الفني، والفاكيوم الفارغ بلا اسم مهما أرسل الهاتف');
+select pg_temp.ok((select pressure_by = :'T' and vacuum_by is null from public.test_records where unit_id = '44444444-4444-4444-4444-444444444444'), 'قسم الضغط باسم الفني، والفاكيوم الفارغ بلا اسم مهما أرسل الهاتف');
 reset role;
 select pg_temp.login(:'S');
-update public.test_records set vacuum_microns = 400;
-select pg_temp.ok((select pressure_by = :'T' and vacuum_by = :'S' from public.test_records), 'تعديل الفاكيوم لا يغيّر صاحب قراءة الضغط');
+update public.test_records set vacuum_microns = 400 where unit_id = '44444444-4444-4444-4444-444444444444';
+select pg_temp.ok((select pressure_by = :'T' and vacuum_by = :'S' from public.test_records where unit_id = '44444444-4444-4444-4444-444444444444'), 'تعديل الفاكيوم لا يغيّر صاحب قراءة الضغط');
 reset role;
 
 -- ---- رابط الخريطة https فقط ----

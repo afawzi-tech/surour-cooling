@@ -18,6 +18,14 @@ Deno.serve(async (req) => {
   const headers = { ...cors(req.headers.get('Origin')), 'Content-Type': 'application/json' };
   const out = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers });
   if (req.method === 'OPTIONS') return new Response('ok', { headers });
+  // أي خطأ غير متوقع يرجع برسالة عامة ومع ترويسات CORS (حتى لا يظهر للمتصفح كخطأ شبكة)
+  try { return await handle(req, out); } catch (e) {
+    console.error('admin-create-user', e instanceof Error ? e.message : e);
+    return out(500, { error: 'حدث خطأ غير متوقع، حاول مرة أخرى' });
+  }
+});
+
+async function handle(req: Request, out: (status: number, body: unknown) => Response): Promise<Response> {
   if (req.method !== 'POST') return out(405, { error: 'طريقة غير مسموحة' });
 
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -35,6 +43,7 @@ Deno.serve(async (req) => {
   // 2) التحقق من المدخلات
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return out(400, { error: 'طلب غير صالح' }); }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return out(400, { error: 'طلب غير صالح' });
   const email = String(body.email || '').trim().toLowerCase();
   const password = String(body.password || '');
   const fullName = String(body.full_name || '').trim().slice(0, 120);
@@ -59,11 +68,16 @@ Deno.serve(async (req) => {
   const id = created.user.id;
   const { data: prof, error: pErr } = await admin.from('profiles')
     .upsert({ id, full_name: fullName, role, active: true }, { onConflict: 'id' }).select().single();
-  if (pErr) return out(500, { error: 'أُنشئ الحساب لكن تعذّر ضبط الدور، غيّره من الجدول' });
+  if (pErr) {
+    // لا نترك حساباً بلا دور صحيح: نحذفه ونطلب الإعادة
+    await admin.auth.admin.deleteUser(id).catch(() => {});
+    return out(500, { error: 'تعذّر إنشاء الحساب، حاول مرة أخرى' });
+  }
 
   // 4) سجل العمليات باسم المدير الذي أضاف (بدون كلمة المرور)
-  await admin.from('audit_log').insert({ actor: who.user.id, table_name: 'profiles', row_id: id, action: 'INSERT',
+  const { error: aErr } = await admin.from('audit_log').insert({ actor: who.user.id, table_name: 'profiles', row_id: id, action: 'INSERT',
     new_data: { email, full_name: fullName, role, created_from: 'app' } });
+  if (aErr) console.error('audit insert failed', aErr.message);
 
   return out(200, { profile: prof });
-});
+}

@@ -116,6 +116,8 @@
   const BEHIND_GAP = 0.15;
   // التاريخ المحلي للجهاز (بغداد UTC+3)، لا UTC، حتى لا يصير "اليوم" أمس بعد منتصف الليل
   const todayStr = () => new Date().toLocaleDateString('en-CA');
+  // روابط الخرائط المسموحة فقط (نفس شرط الخادم في schema.sql)
+  const MAP_URL = /^https:\/\/((www\.)?google\.[a-z.]{2,8}\/maps|maps\.google\.[a-z.]{2,8}|maps\.app\.goo\.gl|goo\.gl\/maps|(www\.|ul\.)?waze\.com|maps\.apple\.com)([/?#][^\s<>"]*)?$/i;
   const dayDiff = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);
   function schedule(p, pct, status, today) {
     const t = today || todayStr();
@@ -145,7 +147,7 @@
   const strongEnough = (p) => p.length >= 8 && p.length <= 72 && /[0-9]/.test(p) && /[A-Za-z]/.test(p);
 
   const Core = { ROLES, GOVS, PTYPES, isCompound, BRAND_SUGGEST, UNIT_WORDS, unitWords, RES, RES_AR, STATUS_AR, STAGE_AR,
-    F, openNcrsOf, pctText, progress, BEHIND_GAP, todayStr, dayDiff, schedule, daysAr, dueText, cntAr, norm, digits, strongEnough };
+    F, openNcrsOf, pctText, progress, BEHIND_GAP, MAP_URL, todayStr, dayDiff, schedule, daysAr, dueText, cntAr, norm, digits, strongEnough };
   g.Core = Core;
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;
 })(typeof window !== 'undefined' ? window : globalThis);
