@@ -1104,3 +1104,8 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
   .pl-row .c-cust small { padding-inline-start: 8px; }
 }
 .is-hidden, [hidden] { display: none !important; }
+.d2-stats .st-btn { width: 100%; }
+.st-go { opacity: 0; transition: opacity var(--dur-1) var(--ease-std); color: var(--sky); }
+.d2-stats .st-btn:hover dt, .d2-stats .st-btn:focus-visible dt { color: var(--sky); }
+.d2-stats .st-btn:hover .st-go, .d2-stats .st-btn:focus-visible .st-go { opacity: 1; }
+.d2-stats .st.sel dt { text-decoration: none; }

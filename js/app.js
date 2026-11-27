@@ -561,9 +561,10 @@
       h('span', { class: 'pj-prog' }, h('span', { class: 'st-bar' }, h('span', { style: { width: (r.pct * 100).toFixed(1) + '%' } })), h('b', null, pctText(r.pct))),
       h('span', { class: 'pj-flags' }, r.flag ? h('span', { class: 'chip ' + (r.bad ? 'st-has-failure' : 'warn-chip'), title: r.why.join('، ') }, r.flag) : null)));
 
-    const stat = (l, v, c, st) => h('div', { class: 'st ' + c + (st && f.st === st ? ' sel' : '') },
-      st ? h('button', { type: 'button', class: 'st-btn', title: 'عرض هذه المشاريع', onClick: () => openList({ st }) }, h('dd', null, num(v)), h('dt', null, l))
-        : [h('dd', null, num(v)), h('dt', null, l)]);
+    // كل رقم يفتح صفحة المشاريع مصفّاة عليه
+    const stat = (l, v, c, st) => h('div', { class: 'st ' + c },
+      h('button', { type: 'button', class: 'st-btn', title: `عرض ${l === 'المشاريع' ? 'كل المشاريع' : 'المشاريع: ' + l}`, onClick: () => openList(st ? { st } : {}) },
+        h('dd', null, num(v)), h('dt', null, l, h('span', { class: 'st-go', 'aria-hidden': 'true' }, ' ←'))));
 
     return h('div', { class: 'dash2 home' },
       h('header', { class: 'd2-head' },
@@ -571,7 +572,7 @@
         h('div', { class: 'd2-pct' }, h('strong', null, pctText(avg)), h('span', null, 'متوسط إنجاز المشاريع'))),
       h('dl', { class: 'd2-stats' },
         stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
-        stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('متأخرة', lateN, lateN ? 'bad' : 'muted', 'late'), stat('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'muted')),
+        stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('متأخرة', lateN, lateN ? 'bad' : 'muted', 'late'), stat('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'muted', 'attn')),
       h('section', { class: 'd2-pipe' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'أين تقف المشاريع'),
         h('span', { class: 'd2-note' }, 'عدد المشاريع عند كل مرحلة' + (rows.some((r) => r.compound) ? '. المجمّعات تُتابَع وحدةً وحدة في قسمها' : ''))), pipe),
       h('div', { class: 'd2-two' }, duesBox, crewsBox),
@@ -657,7 +658,7 @@
         }));
       };
       const hit = (r) => {
-        if (F0.st && (F0.st === 'late' ? !r.late : r.status !== F0.st)) return false;
+        if (F0.st && (F0.st === 'late' ? !r.late : F0.st === 'attn' ? !r.why.length : r.status !== F0.st)) return false;
         if (F0.gov && (F0.gov === '-' ? r.p.governorate : r.p.governorate !== F0.gov)) return false;
         if (F0.brand && (r.p.brand || 'غير محددة') !== F0.brand) return false;
         if (F0.type && (r.compound ? 'compound' : r.p.project_type) !== F0.type) return false;
@@ -719,7 +720,7 @@
       const search = h('input', { type: 'search', class: 'pl-search', value: F0.q, placeholder: 'ابحث باسم المشروع أو العميل أو الهاتف أو المحافظة أو المنفّذ…', 'aria-label': 'بحث في المشاريع', enterkeyhint: 'search',
         onInput: (e) => { F0.q = e.target.value; clearTimeout(search._t); search._t = setTimeout(draw, 120); } });
       const filters = [
-        sel('st', 'كل الحالات', [['in_progress', 'جارية'], ['not_started', 'لم تبدأ'], ['done', 'مكتملة'], ['late', 'متأخرة']]),
+        sel('st', 'كل الحالات', [['in_progress', 'جارية'], ['not_started', 'لم تبدأ'], ['done', 'مكتملة'], ['late', 'متأخرة'], ['attn', 'تحتاج انتباهك']]),
         sel('gov', 'كل المحافظات', [...GOVS.map(([g]) => [g, g]).sort((a, b) => a[0].localeCompare(b[0], 'ar')), ['-', 'بلا محافظة']]),
         sel('brand', 'كل الماركات', [...brands.map((b) => [b, b]), ...(rows.some((r) => !r.p.brand) ? [['غير محددة', 'غير محددة']] : [])]),
         sel('type', 'كل الأنواع', Object.entries(PTYPES)),
