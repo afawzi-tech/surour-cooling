@@ -66,7 +66,13 @@ create trigger profiles_protect_self before update on public.profiles
 
 -- ---------- إزالة ما لا يوجد في ملف Excel (من الإصدارات السابقة) ----------
 drop view if exists public.unit_overview;
-drop table if exists public.project_stages cascade;
+-- project_stages من الإصدار 2 ببنية مختلفة (بلا عمود checkpoint): تُحذف هي فقط، وجدول مراحل العمل الحالي يبقى ببياناته
+do $$ begin
+  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'project_stages')
+     and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'project_stages' and column_name = 'checkpoint') then
+    drop table public.project_stages cascade;
+  end if;
+end $$;
 drop table if exists public.brand_limits cascade;
 -- جداول الإصدار 3 ببنية مختلفة: تُحذف فقط إذا كانت بالبنية القديمة (حتى لا تضيع بيانات عند إعادة التشغيل)
 do $$ begin
@@ -523,6 +529,134 @@ drop policy if exists crews_update on public.crews;
 create policy crews_update on public.crews for update to authenticated using (public.is_staff()) with check (public.is_staff());
 drop policy if exists crews_delete on public.crews;
 create policy crews_delete on public.crews for delete to authenticated using (public.is_admin());
+
+-- ==========================================================
+-- تقارير الفني: الفني عضو في فرقة، ويبلّغ عن بدء أو إكمال مرحلة مسندة لفرقته
+-- مع صورة وملاحظة. التقرير طلب بانتظار موافقة المشرف، ولا يغيّر المرحلة حتى يوافق.
+-- ==========================================================
+alter table public.profiles add column if not exists crew_id uuid references public.crews (id) on delete set null;
+
+-- فرقة المستخدم الحالي (إن كان مفعّلاً)
+create or replace function public.my_crew()
+returns uuid language sql stable security definer set search_path = public as $$
+  select crew_id from public.profiles where id = auth.uid() and active
+$$;
+
+create table if not exists public.stage_requests (
+  id            uuid primary key default gen_random_uuid(),
+  project_id    uuid not null,
+  checkpoint    text not null,
+  action        text not null check (action in ('start', 'done')),
+  note          text check (char_length(note) <= 1000),
+  photo_path    text check (char_length(photo_path) <= 200),
+  status        text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  requested_by  uuid references public.profiles (id) on delete set null default auth.uid(),
+  requested_at  timestamptz not null default now(),
+  reviewed_by   uuid references public.profiles (id) on delete set null,
+  reviewed_at   timestamptz,
+  review_note   text check (char_length(review_note) <= 500),
+  foreign key (project_id, checkpoint) references public.project_stages (project_id, checkpoint) on delete cascade,
+  check (action <> 'done' or photo_path is not null)
+);
+-- طلب واحد بانتظار الموافقة لكل مرحلة
+create unique index if not exists stage_requests_one_pending on public.stage_requests (project_id, checkpoint) where status = 'pending';
+create index if not exists stage_requests_pending_idx on public.stage_requests (requested_at desc) where status = 'pending';
+
+-- التحقق عند الإرسال: المرحلة مسندة لفرقة الفني، والإجراء يناسب حالتها، ومسار الصورة باسم المرسل
+create or replace function public.stage_request_check()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare s public.project_stages; me uuid := auth.uid(); c uuid := public.my_crew();
+begin
+  new.requested_by := me; new.requested_at := now(); new.status := 'pending';
+  new.reviewed_by := null; new.reviewed_at := null; new.review_note := null;
+  new.note := nullif(btrim(new.note), '');
+  select * into s from public.project_stages where project_id = new.project_id and checkpoint = new.checkpoint;
+  if not found or c is null or s.crew_id is distinct from c then
+    raise exception 'هذه المرحلة غير مسندة لفرقتك' using errcode = '42501';
+  end if;
+  if new.action = 'start' and s.status <> 'not_started' then
+    raise exception 'المرحلة بدأت من قبل';
+  elsif new.action = 'done' and s.status not in ('not_started', 'in_progress') then
+    raise exception 'المرحلة مكتملة أو لا تنطبق';
+  end if;
+  if new.photo_path is not null and new.photo_path !~ ('^' || new.project_id::text || '/' || me::text || '/[0-9a-f-]{36}\.(jpg|png|webp)$') then
+    raise exception 'مسار الصورة غير صالح';
+  end if;
+  return new;
+end $$;
+drop trigger if exists stage_requests_check on public.stage_requests;
+create trigger stage_requests_check before insert on public.stage_requests
+  for each row execute function public.stage_request_check();
+
+drop trigger if exists audit_stage_requests on public.stage_requests;
+create trigger audit_stage_requests after insert or update or delete on public.stage_requests
+  for each row execute function public.write_audit();
+
+-- موافقة المشرف أو رفضه. الموافقة تطبّق التقرير على المرحلة بنفس قواعد التطبيق:
+-- "بدأت" = جارية، و"اكتملت" = مكتملة وتبدأ المرحلة التالية بنفس المنفّذ
+create or replace function public.review_stage_request(req uuid, approve boolean, reason text default null)
+returns public.stage_requests language plpgsql security definer set search_path = public as $$
+declare r public.stage_requests; s public.project_stages; nx text;
+begin
+  if not coalesce(public.is_staff(), false) then raise exception 'المراجعة للمدير والمشرف فقط' using errcode = '42501'; end if;
+  select * into r from public.stage_requests where id = req for update;
+  if not found then raise exception 'الطلب غير موجود'; end if;
+  if r.status <> 'pending' then raise exception 'هذا الطلب رُوجع من قبل'; end if;
+  reason := nullif(btrim(reason), '');
+  if not approve and reason is null then raise exception 'اكتب سبب الرفض'; end if;
+  if approve then
+    select * into s from public.project_stages where project_id = r.project_id and checkpoint = r.checkpoint for update;
+    if r.action = 'start' and s.status = 'not_started' then
+      update public.project_stages set status = 'in_progress' where project_id = r.project_id and checkpoint = r.checkpoint;
+    elsif r.action = 'done' and s.status in ('not_started', 'in_progress') then
+      update public.project_stages set status = 'done' where project_id = r.project_id and checkpoint = r.checkpoint;
+      select q.key into nx from public.qc_checkpoints q
+        left join public.project_stages x on x.project_id = r.project_id and x.checkpoint = q.key
+        where q.position > (select position from public.qc_checkpoints where key = r.checkpoint)
+          and coalesce(x.status, 'not_started') = 'not_started'
+        order by q.position limit 1;
+      if nx is not null then
+        insert into public.project_stages (project_id, checkpoint, status, crew, crew_id)
+        values (r.project_id, nx, 'in_progress', s.crew, s.crew_id)
+        on conflict (project_id, checkpoint) do update set status = 'in_progress',
+          crew = coalesce(public.project_stages.crew, excluded.crew), crew_id = coalesce(public.project_stages.crew_id, excluded.crew_id);
+      end if;
+    end if;
+  end if;
+  update public.stage_requests set status = case when approve then 'approved' else 'rejected' end,
+    reviewed_by = auth.uid(), reviewed_at = now(), review_note = left(reason, 500)
+  where id = req returning * into r;
+  return r;
+end $$;
+
+alter table public.stage_requests enable row level security;
+revoke all on public.stage_requests from anon;
+grant select, insert, delete on public.stage_requests to authenticated;
+revoke execute on function public.my_crew(), public.stage_request_check(), public.review_stage_request(uuid, boolean, text) from public, anon;
+grant execute on function public.my_crew(), public.review_stage_request(uuid, boolean, text) to authenticated;
+drop policy if exists requests_select on public.stage_requests;
+create policy requests_select on public.stage_requests for select to authenticated using (public.app_role() is not null);
+drop policy if exists requests_insert on public.stage_requests;
+create policy requests_insert on public.stage_requests for insert to authenticated with check (public.app_role() is not null and requested_by = auth.uid());
+-- الفني يسحب طلبه ما دام بانتظار الموافقة، والمدير يحذف أي طلب
+drop policy if exists requests_delete on public.stage_requests;
+create policy requests_delete on public.stage_requests for delete to authenticated
+  using ((requested_by = auth.uid() and status = 'pending') or public.is_admin());
+
+-- مخزن الصور: خاص (غير عام)، 5 ميغا للصورة، JPEG/PNG/WebP فقط.
+-- المسار: <المشروع>/<المرسل>/<معرّف>.jpg، وكل مستخدم يرفع في مجلده فقط
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('stage-photos', 'stage-photos', false, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+drop policy if exists stage_photos_select on storage.objects;
+create policy stage_photos_select on storage.objects for select to authenticated
+  using (bucket_id = 'stage-photos' and public.app_role() is not null);
+drop policy if exists stage_photos_insert on storage.objects;
+create policy stage_photos_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'stage-photos' and public.app_role() is not null and (storage.foldername(name))[2] = auth.uid()::text);
+drop policy if exists stage_photos_delete on storage.objects;
+create policy stage_photos_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'stage-photos' and ((storage.foldername(name))[2] = auth.uid()::text or public.is_admin()));
 
 -- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:

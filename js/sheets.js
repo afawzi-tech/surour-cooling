@@ -12,6 +12,7 @@
   const S = A.state;
   const X = window.XLSX_LITE;
   const F = A.F;
+  const R = { nowCardPart: (...a) => window.Reports?.nowCardPart(...a) || null, stepBadge: (...a) => window.Reports?.stepBadge(...a) || null, stageHistory: (...a) => window.Reports?.stageHistory(...a) || null };
   let W = A.unitWords({});   // كلمات الوحدة (فيلا، شقة، طابق…) للمشروع المفتوح
 
   const SHEETS = [
@@ -131,7 +132,8 @@
       btn.disabled = true;
       const nx = nextAfter(cur.c.key);
       const ok = await saveStage(p, cur.c.key, { status: 'done', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
-      if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
+      // التالية تبقى مع منفّذها إن كانت مسندة مسبقاً
+      if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: nx.s.crew ?? cur.s.crew ?? null, crew_id: nx.s.crew_id ?? cur.s.crew_id ?? null });
       if (ok) { toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل'); S._just = { p: p.id, done: cur.c.key, start: nx?.c.key || null, pct: sp.pct }; }
       A.render();
     };
@@ -168,7 +170,9 @@
               h('label', { class: 'crew-label' }, 'عدد الكوادر', crew),
               h('button', { type: 'button', class: 'btn primary big', onClick: (e) => start(e.currentTarget, crew, team) }, '▶ ابدأ المرحلة'),
               h('button', { type: 'button', class: 'btn ghost', onClick: async () => { await saveStage(p, cur.c.key, { status: 'na' }); A.render(); } }, 'لا تنطبق على هذا المشروع')))
-          : h('p', { class: 'muted small' }, 'تحديث المراحل للمدير والمشرف.'),
+          : (R.nowCardPart(p, cur.c.key, cur.s.status) || h('p', { class: 'muted small' },
+              S.profile?.crew_id ? 'هذه المرحلة غير مسندة لفرقتك. تحديثها للمدير والمشرف.' : 'تحديث المراحل للمدير والمشرف.')),
+        staff ? R.nowCardPart(p, cur.c.key, cur.s.status) : null,
         ip && nextAfter(cur.c.key) ? h('p', { class: 'nc-next' }, `بعدها: ${nextAfter(cur.c.key).c.name_ar}`) : null);
     }
 
@@ -179,7 +183,7 @@
         h('span', { class: 'sp-dot' }, s.status === 'done' ? '✓' : s.status === 'na' ? '—' : num(c.position)),
         h('span', { class: 'sp-body' }, h('b', null, c.name_ar),
           h('small', null, [dates, A.crewOf(s.crew_id)?.name || '', s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter(Boolean).join(' · ') || ' ')),
-        h('span', { class: 'chip sp-st ' + ST_CLS[s.status] }, A.STAGE_AR[s.status])
+        h('span', { class: 'sp-tags' }, R.stepBadge(p, c.key), h('span', { class: 'chip sp-st ' + ST_CLS[s.status] }, A.STAGE_AR[s.status]))
       ];
       return h('li', { class: `step ${ST_CLS[s.status]}${isCur ? ' cur' : ''}${just?.done === c.key ? ' just-done' : ''}${just?.start === c.key ? ' just-start' : ''}` },
         staff ? h('button', { type: 'button', class: 'sp-row', onClick: () => stageDialog(p, c), 'aria-label': `${c.name_ar}: ${A.STAGE_AR[s.status]}. تعديل` }, inner) : h('div', { class: 'sp-row' }, inner));
@@ -255,7 +259,7 @@
     const notes = h('textarea', { rows: 3, maxlength: 2000 }, s.notes || '');
     A.modal(`${num(c.position)}. ${c.name_ar}`, h('div', { class: 'stack sm' }, seg,
       h('div', { class: 'form-grid' }, A.field('تاريخ البدء', sd, { hint: 'يُملأ تلقائياً عند "جارية"' }), A.field('تاريخ الانتهاء', ed, { hint: 'يُملأ تلقائياً عند "مكتملة"' }),
-        A.field('المنفّذ (فرقة أو مقاول)', team), A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }))),
+        A.field('المنفّذ (فرقة أو مقاول)', team), A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }), R.stageHistory(p, c.key))),
     [{ label: 'حفظ', cls: 'primary', run: async () => {
       const n = crew.value === '' ? null : Number(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { toast('عدد الكوادر من 0 إلى 500', 'error'); return false; }

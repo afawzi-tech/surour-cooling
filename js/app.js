@@ -37,13 +37,15 @@
   const RES_AR = { pass: 'ناجح', fail: 'فاشل', pending: 'معلّق', na: 'لا ينطبق' };
   const STATUS_AR = { 'Complete': 'مكتملة', 'In progress': 'جارية', 'Not started': 'لم تبدأ', 'Has failure': 'بها فشل' };
   const TABLES = { profiles: 'المستخدمون', projects: 'المشاريع', units: 'Villa Tracker', unit_checks: 'Villa Tracker',
-    test_records: 'Test Records', ncrs: 'NCR Register', materials: 'المواد', project_stages: 'مراحل العمل', crews: 'الفرق' };
+    test_records: 'Test Records', ncrs: 'NCR Register', materials: 'المواد', project_stages: 'مراحل العمل', crews: 'الفرق', stage_requests: 'تقارير المراحل' };
   const ACTIONS = { INSERT: 'إضافة', UPDATE: 'تعديل', DELETE: 'حذف' };
 
   const state = {
     sb: null, user: null, profile: null,
     projects: [], checkpoints: [], crews: [],
     stages: {},       // لكل مشروع: { checkpoint: صف المرحلة }
+    requests: [],     // تقارير الفنيين (المعلّقة + آخر 30 يوماً)
+    people: {},       // أسماء المستخدمين: { id: الاسم }
     data: {}          // لكل مشروع: { units, tests: Map(unit_id), ncrs }
   };
   const role = () => state.profile?.role;
@@ -137,17 +139,22 @@
   }
 
   async function loadBase() {
-    const [projects, cps, stages, crews] = await Promise.all([
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const [projects, cps, stages, crews, reqs, people] = await Promise.all([
       state.sb.from('projects').select('*').order('created_at'),
       state.sb.from('qc_checkpoints').select('*').order('position'),
       fetchAll((a, b) => state.sb.from('project_stages').select('*').range(a, b)),
-      state.sb.from('crews').select('*').order('name')]);
+      state.sb.from('crews').select('*').order('name'),
+      fetchAll((a, b) => state.sb.from('stage_requests').select('*').or(`status.eq.pending,requested_at.gte.${since}`).order('requested_at', { ascending: false }).range(a, b)),
+      state.sb.from('profiles').select('id, full_name')]);
     if (projects.error) throw projects.error;
     if (cps.error) throw cps.error;
     state.projects = projects.data;
     state.checkpoints = cps.data;
     if (crews.error) throw crews.error;
     state.crews = crews.data;
+    state.requests = reqs;
+    state.people = people.error ? {} : Object.fromEntries(people.data.map((x) => [x.id, x.full_name]));
     state.stages = {};
     stages.forEach((x) => { (state.stages[x.project_id] ||= {})[x.checkpoint] = x; });
   }
@@ -573,6 +580,7 @@
       h('dl', { class: 'd2-stats' },
         stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
         stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('متأخرة', lateN, lateN ? 'bad' : 'muted', 'late'), stat('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'muted', 'attn')),
+      window.Reports ? window.Reports.homeBox() : null,
       h('section', { class: 'd2-pipe' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'أين تقف المشاريع'),
         h('span', { class: 'd2-note' }, 'عدد المشاريع عند كل مرحلة' + (rows.some((r) => r.compound) ? '. المجمّعات تُتابَع وحدةً وحدة في قسمها' : ''))), pipe),
       h('div', { class: 'd2-two' }, duesBox, crewsBox),
@@ -1238,7 +1246,7 @@
       field('الاسم', name, { wide: true }), field('البريد الإلكتروني', email, { wide: true }),
       field('كلمة المرور', pass, { hint: '8 أحرف على الأقل، فيها أرقام وحروف' }),
       h('div', { class: 'field' }, h('label', null, '\u00a0'), h('button', { type: 'button', class: 'btn', onClick: gen }, 'كلمة مرور جديدة')),
-      field('الدور', roleSel, { wide: true, hint: 'الفني يشاهد ويسجّل قراءات الفحص فقط' })),
+      field('الدور', roleSel, { wide: true, hint: 'الفني يشاهد، ويسجّل قراءات الفحص، ويبلّغ عن مراحل فرقته مع صورة. اختر فرقته من الجدول بعد الإنشاء' })),
     [{ label: 'إنشاء الحساب', cls: 'primary', run: async () => {
       const v = { full_name: name.value.trim(), email: email.value.trim().toLowerCase(), password: pass.value, role: roleSel.value };
       if (!v.full_name) { toast('اكتب الاسم', 'error'); return false; }
@@ -1276,15 +1284,19 @@
       };
       return h('div', { class: 'stack' },
         h('div', { class: 'row between' }, h('h1', null, 'المستخدمون'), h('button', { type: 'button', class: 'btn primary', onClick: newUser }, '+ مستخدم جديد')),
-        h('p', { class: 'muted' }, 'غيّر الاسم أو الدور من الجدول ويُحفظ وحده. لإيقاف شخص ترك العمل، أزل علامة "مفعّل" بدل الحذف حتى تبقى سجلاته.'),
+        h('p', { class: 'muted' }, 'غيّر الاسم أو الدور أو الفرقة من الجدول ويُحفظ وحده. الفني يبلّغ عن بدء وإكمال المراحل المسندة لفرقته فقط. لإيقاف شخص ترك العمل، أزل علامة "مفعّل" بدل الحذف حتى تبقى سجلاته.'),
         h('section', { class: 'card' }, h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-          h('thead', null, h('tr', null, h('th', null, 'الاسم'), h('th', null, 'الدور'), h('th', null, 'مفعّل'), h('th', null, 'أُضيف'))),
+          h('thead', null, h('tr', null, h('th', null, 'الاسم'), h('th', null, 'الدور'), h('th', null, 'الفرقة'), h('th', null, 'مفعّل'), h('th', null, 'أُضيف'))),
           h('tbody', null, data.map((u) => {
             const me = u.id === state.user.id;
             return h('tr', null,
               h('td', null, h('input', { value: u.full_name, maxlength: 120, 'aria-label': 'الاسم', onChange: (e) => save(u, { full_name: e.target.value.trim() }) })),
               h('td', null, h('select', { disabled: me, 'aria-label': 'الدور', onChange: (e) => save(u, { role: e.target.value }) },
                 Object.entries(ROLES).map(([v, l]) => h('option', { value: v, selected: u.role === v }, l)))),
+              // الفني يبلّغ عن مراحل فرقته فقط
+              h('td', null, h('select', { 'aria-label': 'الفرقة', onChange: (e) => save(u, { crew_id: e.target.value || null }) },
+                h('option', { value: '' }, 'بدون فرقة'),
+                state.crews.filter((c) => c.kind === 'internal' && (c.active || c.id === u.crew_id)).map((c) => h('option', { value: c.id, selected: u.crew_id === c.id }, c.name)))),
               h('td', null, h('input', { type: 'checkbox', checked: u.active, disabled: me, 'aria-label': 'مفعّل', onChange: (e) => save(u, { active: e.target.checked }) })),
               h('td', { dir: 'ltr' }, date(u.created_at)));
           }))))),
@@ -1294,6 +1306,8 @@
             ['عرض كل المشاريع والمراحل والفرق وبيانات العملاء', 1, 1, 1],
             ['تسجيل قراءات الفحص في المجمّعات', 1, 1, 1],
             ['إنشاء المشاريع وتعديل بياناتها ومواعيدها', 1, 1, 0],
+            ['التبليغ عن بدء أو إكمال مرحلة مسندة لفرقته (مع صورة)', 0, 0, 1],
+            ['الموافقة على تقارير الفنيين أو رفضها', 1, 1, 0],
             ['بدء المراحل وإكمالها وإسنادها لفرقة أو مقاول', 1, 1, 0],
             ['إضافة الفرق والمقاولين وتعديلهم', 1, 1, 0],
             ['نتائج فحص الفلل، وNCR، واستيراد Excel، والنسخة الاحتياطية', 1, 1, 0],
