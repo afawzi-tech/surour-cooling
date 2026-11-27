@@ -51,12 +51,12 @@ returns text language sql stable security definer set search_path = public as $$
   select role from public.profiles where id = auth.uid() and active
 $$;
 create or replace function public.is_staff()
-returns boolean language sql stable as $$ select public.app_role() in ('admin', 'supervisor') $$;
+returns boolean language sql stable set search_path = public as $$ select public.app_role() in ('admin', 'supervisor') $$;
 create or replace function public.is_admin()
-returns boolean language sql stable as $$ select public.app_role() = 'admin' $$;
+returns boolean language sql stable set search_path = public as $$ select public.app_role() = 'admin' $$;
 
 create or replace function public.protect_self_admin()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   if old.id = auth.uid() and (new.role <> 'admin' or not new.active) then
     raise exception 'لا يمكنك إزالة صلاحية المدير أو تعطيل حسابك بنفسك';
@@ -70,7 +70,7 @@ create trigger profiles_protect_self before update on public.profiles
 
 -- ---------- إزالة ما لا يوجد في ملف Excel (من الإصدارات السابقة) ----------
 drop view if exists public.unit_overview;
--- جدول المراحل الثماني القديم (v2) فقط: لا نحذف الجدول الحالي (مراحل الـ13، فيه عمود checkpoint)
+-- project_stages من الإصدار 2 ببنية مختلفة (بلا عمود checkpoint): تُحذف هي فقط، وجدول مراحل العمل الحالي يبقى ببياناته
 do $$ begin
   if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'project_stages')
      and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'project_stages' and column_name = 'checkpoint') then
@@ -127,7 +127,7 @@ alter table public.projects add column if not exists project_type text not null 
 alter table public.projects add column if not exists unit_label text not null default 'وحدة' check (char_length(btrim(unit_label)) between 1 and 20);
 
 create or replace function public.touch_updated_at()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   new.updated_at := now(); new.created_by := old.created_by; new.created_at := old.created_at;
   return new;
@@ -199,7 +199,7 @@ create trigger units_create_checks after insert on public.units
 
 -- مثل الملف: لا منع، فقط تسجيل من غيّر ومتى (التنبيه يظهر في عمود Sequence alert)
 create or replace function public.unit_check_before_update()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   new.unit_id := old.unit_id; new.checkpoint := old.checkpoint;
   if new.result is distinct from old.result or new.notes is distinct from old.notes then
@@ -233,7 +233,7 @@ create table if not exists public.test_records (
 );
 
 create or replace function public.test_record_stamp()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   if tg_op = 'UPDATE' then new.unit_id := old.unit_id; end if;
   new.updated_by := auth.uid(); new.updated_at := now();
@@ -389,11 +389,12 @@ end $$;
 
 do $$
 declare
-  member text := 'public.app_role() is not null';
-  staff  text := 'public.is_staff()';
-  admin  text := 'public.is_admin()';
+  -- (select …) تجعل PostgreSQL يحسب الدور مرة واحدة لكل استعلام بدل مرة لكل صف
+  member text := '(select public.app_role()) is not null';
+  staff  text := '(select public.is_staff())';
+  admin  text := '(select public.is_admin())';
 begin
-  perform pg_temp.pol('profiles', 'profiles_select', 'select', 'id = auth.uid() or ' || member, null);
+  perform pg_temp.pol('profiles', 'profiles_select', 'select', 'id = (select auth.uid()) or ' || member, null);
   perform pg_temp.pol('profiles', 'profiles_update', 'update', admin, admin);
 
   perform pg_temp.pol('projects', 'projects_select', 'select', member, null);
@@ -483,13 +484,13 @@ alter table public.project_stages enable row level security;
 revoke all on public.project_stages from anon;
 grant select, insert, update, delete on public.project_stages to authenticated;
 drop policy if exists stages_select on public.project_stages;
-create policy stages_select on public.project_stages for select to authenticated using (public.app_role() is not null);
+create policy stages_select on public.project_stages for select to authenticated using ((select public.app_role()) is not null);
 drop policy if exists stages_insert on public.project_stages;
-create policy stages_insert on public.project_stages for insert to authenticated with check (public.is_staff());
+create policy stages_insert on public.project_stages for insert to authenticated with check ((select public.is_staff()));
 drop policy if exists stages_update on public.project_stages;
-create policy stages_update on public.project_stages for update to authenticated using (public.is_staff()) with check (public.is_staff());
+create policy stages_update on public.project_stages for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
 drop policy if exists stages_delete on public.project_stages;
-create policy stages_delete on public.project_stages for delete to authenticated using (public.is_admin());
+create policy stages_delete on public.project_stages for delete to authenticated using ((select public.is_admin()));
 
 -- ==========================================================
 -- بيانات العميل والعقد ومواعيد المشروع
@@ -529,13 +530,435 @@ alter table public.crews enable row level security;
 revoke all on public.crews from anon;
 grant select, insert, update, delete on public.crews to authenticated;
 drop policy if exists crews_select on public.crews;
-create policy crews_select on public.crews for select to authenticated using (public.app_role() is not null);
+create policy crews_select on public.crews for select to authenticated using ((select public.app_role()) is not null);
 drop policy if exists crews_insert on public.crews;
-create policy crews_insert on public.crews for insert to authenticated with check (public.is_staff());
+create policy crews_insert on public.crews for insert to authenticated with check ((select public.is_staff()));
 drop policy if exists crews_update on public.crews;
-create policy crews_update on public.crews for update to authenticated using (public.is_staff()) with check (public.is_staff());
+create policy crews_update on public.crews for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
 drop policy if exists crews_delete on public.crews;
-create policy crews_delete on public.crews for delete to authenticated using (public.is_admin());
+create policy crews_delete on public.crews for delete to authenticated using ((select public.is_admin()));
+
+-- ==========================================================
+-- فرقة وحدة المجمّع من قائمة الفرق (بدل النص الحر)
+-- حتى يُحسب شغل المجمّعات في أداء الفرق والمقاولين.
+-- عمود crew النصي القديم يبقى محفوظاً ولا تستعمله الواجهة.
+-- ==========================================================
+-- توحيد الاسم للمطابقة: أ إ آ ← ا، ة ← ه، ى ← ي، بدون تشكيل ومسافات زائدة (مثل البحث في الواجهة)
+create or replace function public.name_key(t text) returns text
+language sql immutable parallel safe set search_path = '' as $$
+  select btrim(regexp_replace(
+    translate(regexp_replace(lower(coalesce(t, '')), '[\u064B-\u065F\u0670\u0640]', '', 'g'), 'أإآٱةىؤئ', 'ااااهيوي'),
+    '\s+', ' ', 'g'))
+$$;
+
+do $$ begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'units' and column_name = 'crew_id') then
+    alter table public.units add column crew_id uuid references public.crews (id) on delete set null;
+    -- نقل لمرة واحدة: كل اسم غير موجود في القائمة تُنشأ له فرقة من الشركة، ثم تُربط الوحدات بالمطابق
+    insert into public.crews (name, kind)
+    select min(regexp_replace(btrim(u.crew), '\s+', ' ', 'g')), 'internal' from public.units u
+    where nullif(btrim(u.crew), '') is not null
+      and not exists (select 1 from public.crews c where public.name_key(c.name) = public.name_key(u.crew))
+    group by public.name_key(u.crew);
+    update public.units u set crew_id = c.id from public.crews c
+    where nullif(btrim(u.crew), '') is not null and public.name_key(c.name) = public.name_key(u.crew);
+  end if;
+end $$;
+create index if not exists units_crew_idx on public.units (crew_id);
+
+create or replace view public.unit_overview with (security_invoker = true) as
+select
+  u.id, u.project_id, u.code, u.zone, u.crew, u.remarks, u.position, u.created_at,
+  (select jsonb_object_agg(c.checkpoint, c.result) from public.unit_checks c where c.unit_id = u.id) as results,
+  u.crew_id
+from public.units u;
+
+-- أداء الفرق في المجمّعات: لكل فرقة ومشروع عدد الوحدات وحالتها (نفس معادلة Villa Tracker:
+-- فيها فشل إذا فشل أي بند، مكتملة إذا الناجح + لا ينطبق = كل البنود، لم تبدأ إذا لا ناجح)
+create or replace view public.crew_unit_stats with (security_invoker = true) as
+with k as (
+  select u.id, u.project_id, u.crew_id,
+    count(*) filter (where c.result = 'pass') as q,
+    count(*) filter (where c.result = 'fail') as r,
+    count(*) filter (where c.result = 'na')   as na,
+    max(c.inspected_at) as last_at
+  from public.units u left join public.unit_checks c on c.unit_id = u.id
+  where u.crew_id is not null
+  group by u.id
+), n as (select count(*) as total from public.qc_checkpoints)
+select k.crew_id, k.project_id,
+  count(*)::int                                                               as units,
+  count(*) filter (where k.r = 0 and k.q + k.na = n.total)::int               as done,
+  count(*) filter (where k.r > 0)::int                                        as failing,
+  count(*) filter (where k.r = 0 and k.q > 0 and k.q + k.na < n.total)::int   as in_progress,
+  max(k.last_at)                                                              as last_at
+from k cross join n
+group by k.crew_id, k.project_id;
+revoke all on public.crew_unit_stats from anon;
+grant select on public.crew_unit_stats to authenticated;
+
+-- ==========================================================
+-- تقارير الفني: الفني عضو في فرقة، ويبلّغ عن بدء أو إكمال مرحلة مسندة لفرقته
+-- مع صورة وملاحظة. التقرير طلب بانتظار موافقة المشرف، ولا يغيّر المرحلة حتى يوافق.
+-- ==========================================================
+alter table public.profiles add column if not exists crew_id uuid references public.crews (id) on delete set null;
+
+-- فرقة المستخدم الحالي (إن كان مفعّلاً)
+create or replace function public.my_crew()
+returns uuid language sql stable security definer set search_path = public as $$
+  select crew_id from public.profiles where id = auth.uid() and active
+$$;
+
+create table if not exists public.stage_requests (
+  id            uuid primary key default gen_random_uuid(),
+  project_id    uuid not null,
+  checkpoint    text not null,
+  action        text not null check (action in ('start', 'done')),
+  note          text check (char_length(note) <= 1000),
+  photo_path    text check (char_length(photo_path) <= 200),
+  status        text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  requested_by  uuid references public.profiles (id) on delete set null default auth.uid(),
+  requested_at  timestamptz not null default now(),
+  reviewed_by   uuid references public.profiles (id) on delete set null,
+  reviewed_at   timestamptz,
+  review_note   text check (char_length(review_note) <= 500),
+  foreign key (project_id, checkpoint) references public.project_stages (project_id, checkpoint) on delete cascade,
+  check (action <> 'done' or photo_path is not null)
+);
+-- طلب واحد بانتظار الموافقة لكل مرحلة
+create unique index if not exists stage_requests_one_pending on public.stage_requests (project_id, checkpoint) where status = 'pending';
+create index if not exists stage_requests_pending_idx on public.stage_requests (requested_at desc) where status = 'pending';
+
+-- التحقق عند الإرسال: المرحلة مسندة لفرقة الفني، والإجراء يناسب حالتها، ومسار الصورة باسم المرسل
+create or replace function public.stage_request_check()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare s public.project_stages; me uuid := auth.uid(); c uuid := public.my_crew();
+begin
+  new.requested_by := me; new.requested_at := now(); new.status := 'pending';
+  new.reviewed_by := null; new.reviewed_at := null; new.review_note := null;
+  new.note := nullif(btrim(new.note), '');
+  select * into s from public.project_stages where project_id = new.project_id and checkpoint = new.checkpoint;
+  if not found or c is null or s.crew_id is distinct from c then
+    raise exception 'هذه المرحلة غير مسندة لفرقتك' using errcode = '42501';
+  end if;
+  if new.action = 'start' and s.status <> 'not_started' then
+    raise exception 'المرحلة بدأت من قبل';
+  elsif new.action = 'done' and s.status not in ('not_started', 'in_progress') then
+    raise exception 'المرحلة مكتملة أو لا تنطبق';
+  end if;
+  if new.photo_path is not null and new.photo_path !~ ('^' || new.project_id::text || '/' || me::text || '/[0-9a-f-]{36}\.(jpg|png|webp)$') then
+    raise exception 'مسار الصورة غير صالح';
+  end if;
+  return new;
+end $$;
+drop trigger if exists stage_requests_check on public.stage_requests;
+create trigger stage_requests_check before insert on public.stage_requests
+  for each row execute function public.stage_request_check();
+
+drop trigger if exists audit_stage_requests on public.stage_requests;
+create trigger audit_stage_requests after insert or update or delete on public.stage_requests
+  for each row execute function public.write_audit();
+
+-- موافقة المشرف أو رفضه. الموافقة تطبّق التقرير على المرحلة بنفس قواعد التطبيق:
+-- "بدأت" = جارية، و"اكتملت" = مكتملة وتبدأ المرحلة التالية بنفس المنفّذ
+create or replace function public.review_stage_request(req uuid, approve boolean, reason text default null)
+returns public.stage_requests language plpgsql security definer set search_path = public as $$
+declare r public.stage_requests; s public.project_stages; nx text;
+begin
+  if not coalesce(public.is_staff(), false) then raise exception 'المراجعة للمدير والمشرف فقط' using errcode = '42501'; end if;
+  select * into r from public.stage_requests where id = req for update;
+  if not found then raise exception 'الطلب غير موجود'; end if;
+  if r.status <> 'pending' then raise exception 'هذا الطلب رُوجع من قبل'; end if;
+  reason := nullif(btrim(reason), '');
+  if not approve and reason is null then raise exception 'اكتب سبب الرفض'; end if;
+  if approve then
+    select * into s from public.project_stages where project_id = r.project_id and checkpoint = r.checkpoint for update;
+    if r.action = 'start' and s.status = 'not_started' then
+      update public.project_stages set status = 'in_progress' where project_id = r.project_id and checkpoint = r.checkpoint;
+    elsif r.action = 'done' and s.status in ('not_started', 'in_progress') then
+      update public.project_stages set status = 'done' where project_id = r.project_id and checkpoint = r.checkpoint;
+      select q.key into nx from public.qc_checkpoints q
+        left join public.project_stages x on x.project_id = r.project_id and x.checkpoint = q.key
+        where q.position > (select position from public.qc_checkpoints where key = r.checkpoint)
+          and coalesce(x.status, 'not_started') = 'not_started'
+        order by q.position limit 1;
+      if nx is not null then
+        insert into public.project_stages (project_id, checkpoint, status, crew, crew_id)
+        values (r.project_id, nx, 'in_progress', s.crew, s.crew_id)
+        on conflict (project_id, checkpoint) do update set status = 'in_progress',
+          crew = coalesce(public.project_stages.crew, excluded.crew), crew_id = coalesce(public.project_stages.crew_id, excluded.crew_id);
+      end if;
+    end if;
+  end if;
+  update public.stage_requests set status = case when approve then 'approved' else 'rejected' end,
+    reviewed_by = auth.uid(), reviewed_at = now(), review_note = left(reason, 500)
+  where id = req returning * into r;
+  return r;
+end $$;
+
+alter table public.stage_requests enable row level security;
+revoke all on public.stage_requests from anon;
+grant select, insert, delete on public.stage_requests to authenticated;
+revoke execute on function public.my_crew(), public.stage_request_check(), public.review_stage_request(uuid, boolean, text) from public, anon;
+grant execute on function public.my_crew(), public.review_stage_request(uuid, boolean, text) to authenticated;
+drop policy if exists requests_select on public.stage_requests;
+create policy requests_select on public.stage_requests for select to authenticated using ((select public.app_role()) is not null);
+drop policy if exists requests_insert on public.stage_requests;
+create policy requests_insert on public.stage_requests for insert to authenticated with check ((select public.app_role()) is not null and requested_by = (select auth.uid()));
+-- الفني يسحب طلبه ما دام بانتظار الموافقة، والمدير يحذف أي طلب
+drop policy if exists requests_delete on public.stage_requests;
+create policy requests_delete on public.stage_requests for delete to authenticated
+  using ((requested_by = (select auth.uid()) and status = 'pending') or (select public.is_admin()));
+
+-- مخزن الصور: خاص (غير عام)، 5 ميغا للصورة، JPEG/PNG/WebP فقط.
+-- المسار: <المشروع>/<المرسل>/<معرّف>.jpg، وكل مستخدم يرفع في مجلده فقط
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('stage-photos', 'stage-photos', false, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+drop policy if exists stage_photos_select on storage.objects;
+create policy stage_photos_select on storage.objects for select to authenticated
+  using (bucket_id = 'stage-photos' and (select public.app_role()) is not null);
+drop policy if exists stage_photos_insert on storage.objects;
+create policy stage_photos_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'stage-photos' and (select public.app_role()) is not null and (storage.foldername(name))[2] = (select auth.uid())::text);
+drop policy if exists stage_photos_delete on storage.objects;
+create policy stage_photos_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'stage-photos' and ((storage.foldername(name))[2] = (select auth.uid())::text or (select public.is_admin())));
+
+-- ==========================================================
+-- أداء الفنيين: من سجّل كل قراءة (ضغط، فاكيوم، شحن) ومتى، يُملأ على الخادم ولا يُرسل من الهاتف.
+-- الفشل وNCR تُحسب على من سجّل قراءة ذاك الفحص، وأرقام الفرقة تُعرض بجانبها.
+-- ==========================================================
+do $$ begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'test_records' and column_name = 'pressure_by') then
+    alter table public.test_records
+      add column pressure_by uuid references public.profiles (id) on delete set null,
+      add column pressure_at timestamptz,
+      add column vacuum_by   uuid references public.profiles (id) on delete set null,
+      add column vacuum_at   timestamptz,
+      add column charge_by   uuid references public.profiles (id) on delete set null,
+      add column charge_at   timestamptz;
+    -- نقل لمرة واحدة من سجل العمليات: آخر شخص غيّر قراءات كل قسم
+    with ch as (
+      select a.row_id::uuid as unit_id, a.actor, a.at,
+        (select jsonb_agg(coalesce(a.new_data -> k, 'null')) from unnest(array['pressure_date','test_pressure','hold_hours','start_mpa','end_mpa']) k)
+          is distinct from (select jsonb_agg(coalesce(a.old_data -> k, 'null')) from unnest(array['pressure_date','test_pressure','hold_hours','start_mpa','end_mpa']) k) as p,
+        (select jsonb_agg(coalesce(a.new_data -> k, 'null')) from unnest(array['vacuum_date','vacuum_microns','vacuum_hold_min','vacuum_rise']) k)
+          is distinct from (select jsonb_agg(coalesce(a.old_data -> k, 'null')) from unnest(array['vacuum_date','vacuum_microns','vacuum_hold_min','vacuum_rise']) k) as v,
+        (select jsonb_agg(coalesce(a.new_data -> k, 'null')) from unnest(array['charge_calc_kg','charge_actual_kg','cylinder_no']) k)
+          is distinct from (select jsonb_agg(coalesce(a.old_data -> k, 'null')) from unnest(array['charge_calc_kg','charge_actual_kg','cylinder_no']) k) as c
+      from public.audit_log a
+      where a.table_name = 'test_records' and a.action in ('INSERT', 'UPDATE') and a.actor is not null
+        and exists (select 1 from public.profiles pr where pr.id = a.actor)
+    ), lp as (select distinct on (unit_id) unit_id, actor, at from ch where p order by unit_id, at desc),
+       lv as (select distinct on (unit_id) unit_id, actor, at from ch where v order by unit_id, at desc),
+       lc as (select distinct on (unit_id) unit_id, actor, at from ch where c order by unit_id, at desc)
+    update public.test_records t set
+      pressure_by = lp.actor, pressure_at = lp.at,
+      vacuum_by = lv.actor,   vacuum_at = lv.at,
+      charge_by = lc.actor,   charge_at = lc.at
+    from public.test_records t2
+      left join lp on lp.unit_id = t2.unit_id
+      left join lv on lv.unit_id = t2.unit_id
+      left join lc on lc.unit_id = t2.unit_id
+    where t.unit_id = t2.unit_id and (lp.actor is not null or lv.actor is not null or lc.actor is not null);
+  end if;
+end $$;
+create index if not exists test_records_pressure_by_idx on public.test_records (pressure_by, pressure_at);
+create index if not exists test_records_vacuum_by_idx   on public.test_records (vacuum_by, vacuum_at);
+create index if not exists test_records_charge_by_idx   on public.test_records (charge_by, charge_at);
+create index if not exists unit_checks_inspected_by_idx on public.unit_checks (inspected_by, inspected_at);
+create index if not exists stage_requests_by_idx        on public.stage_requests (requested_by, requested_at);
+
+-- يُملأ "من سجّل" لكل قسم تغيّرت قراءاته فقط، وما يرسله الهاتف في هذه الأعمدة يُتجاهل
+create or replace function public.test_record_stamp()
+returns trigger language plpgsql set search_path = public as $$
+declare me uuid := auth.uid();
+begin
+  if tg_op = 'UPDATE' then
+    new.unit_id := old.unit_id;
+    new.pressure_by := old.pressure_by; new.pressure_at := old.pressure_at;
+    new.vacuum_by := old.vacuum_by;     new.vacuum_at := old.vacuum_at;
+    new.charge_by := old.charge_by;     new.charge_at := old.charge_at;
+    if (new.pressure_date, new.test_pressure, new.hold_hours, new.start_mpa, new.end_mpa)
+       is distinct from (old.pressure_date, old.test_pressure, old.hold_hours, old.start_mpa, old.end_mpa) then
+      new.pressure_by := me; new.pressure_at := now();
+    end if;
+    if (new.vacuum_date, new.vacuum_microns, new.vacuum_hold_min, new.vacuum_rise)
+       is distinct from (old.vacuum_date, old.vacuum_microns, old.vacuum_hold_min, old.vacuum_rise) then
+      new.vacuum_by := me; new.vacuum_at := now();
+    end if;
+    if (new.charge_calc_kg, new.charge_actual_kg, new.cylinder_no)
+       is distinct from (old.charge_calc_kg, old.charge_actual_kg, old.cylinder_no) then
+      new.charge_by := me; new.charge_at := now();
+    end if;
+  else
+    new.pressure_by := null; new.pressure_at := null; new.vacuum_by := null; new.vacuum_at := null; new.charge_by := null; new.charge_at := null;
+    if coalesce(new.pressure_date::text, new.test_pressure::text, new.hold_hours::text, new.start_mpa::text, new.end_mpa::text) is not null then
+      new.pressure_by := me; new.pressure_at := now();
+    end if;
+    if coalesce(new.vacuum_date::text, new.vacuum_microns::text, new.vacuum_hold_min::text, new.vacuum_rise::text) is not null then
+      new.vacuum_by := me; new.vacuum_at := now();
+    end if;
+    if coalesce(new.charge_calc_kg::text, new.charge_actual_kg::text, new.cylinder_no) is not null then
+      new.charge_by := me; new.charge_at := now();
+    end if;
+  end if;
+  new.updated_by := me; new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists test_records_stamp on public.test_records;
+create trigger test_records_stamp before insert or update on public.test_records
+  for each row execute function public.test_record_stamp();
+
+-- أرقام الأداء لكل مستخدم خلال فترة (من، إلى؛ null = بلا حد).
+-- المدير والمشرف يرون الكل، والفني يرى سطره هو فقط (التحقق هنا على الخادم).
+create or replace function public.tech_performance(p_from date default null, p_to date default null)
+returns table (
+  user_id uuid, full_name text, role text, active boolean, crew_id uuid,
+  readings int, pressure int, vacuum int, charge int,
+  failed int, ncrs int, ncrs_open int,
+  results int, reports int, reports_approved int, reports_rejected int,
+  team_ncrs int, team_ncrs_open int, last_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  with lo as (select coalesce(p_from::timestamptz, '-infinity'::timestamptz) as a,
+                     coalesce((p_to + 1)::timestamptz, 'infinity'::timestamptz) as b),
+  who as (
+    select pr.* from public.profiles pr
+    where public.app_role() is not null and (public.is_staff() or pr.id = auth.uid())
+  ),
+  rd as (   -- قراءة واحدة لكل (وحدة، قسم) مع نتيجة ذاك الفحص
+    select t.unit_id, x.cp, x.by, x.at, c.result
+    from public.test_records t
+    cross join lateral (values ('pressure_test', t.pressure_by, t.pressure_at),
+                               ('vacuum', t.vacuum_by, t.vacuum_at),
+                               ('charging', t.charge_by, t.charge_at)) as x(cp, by, at)
+    left join public.unit_checks c on c.unit_id = t.unit_id and c.checkpoint = x.cp
+    cross join lo
+    where x.by is not null and x.at >= lo.a and x.at < lo.b
+  )
+  select w.id, w.full_name, w.role, w.active, w.crew_id,
+    (select count(*)::int from rd where rd.by = w.id),
+    (select count(*)::int from rd where rd.by = w.id and rd.cp = 'pressure_test'),
+    (select count(*)::int from rd where rd.by = w.id and rd.cp = 'vacuum'),
+    (select count(*)::int from rd where rd.by = w.id and rd.cp = 'charging'),
+    (select count(*)::int from rd where rd.by = w.id and rd.result = 'fail'),
+    (select count(*)::int from public.ncrs n join rd on rd.unit_id = n.unit_id and rd.cp = n.checkpoint where rd.by = w.id),
+    (select count(*)::int from public.ncrs n join rd on rd.unit_id = n.unit_id and rd.cp = n.checkpoint where rd.by = w.id and n.status = 'open'),
+    (select count(*)::int from public.unit_checks c, lo where c.inspected_by = w.id and c.result <> 'pending' and c.inspected_at >= lo.a and c.inspected_at < lo.b),
+    (select count(*)::int from public.stage_requests r, lo where r.requested_by = w.id and r.requested_at >= lo.a and r.requested_at < lo.b),
+    (select count(*)::int from public.stage_requests r, lo where r.requested_by = w.id and r.status = 'approved' and r.requested_at >= lo.a and r.requested_at < lo.b),
+    (select count(*)::int from public.stage_requests r, lo where r.requested_by = w.id and r.status = 'rejected' and r.requested_at >= lo.a and r.requested_at < lo.b),
+    (select count(*)::int from public.ncrs n join public.units u on u.id = n.unit_id
+       where w.crew_id is not null and u.crew_id = w.crew_id and (p_from is null or n.date_raised >= p_from) and (p_to is null or n.date_raised <= p_to)),
+    (select count(*)::int from public.ncrs n join public.units u on u.id = n.unit_id
+       where w.crew_id is not null and u.crew_id = w.crew_id and n.status = 'open' and (p_from is null or n.date_raised >= p_from) and (p_to is null or n.date_raised <= p_to)),
+    greatest((select max(rd.at) from rd where rd.by = w.id),
+             (select max(c.inspected_at) from public.unit_checks c where c.inspected_by = w.id),
+             (select max(r.requested_at) from public.stage_requests r where r.requested_by = w.id))
+  from who w
+$$;
+revoke execute on function public.tech_performance(date, date) from public, anon;
+grant execute on function public.tech_performance(date, date) to authenticated;
+
+-- ==========================================================
+-- الأداء: فهرس لكل مفتاح أجنبي (يسرّع الربط بين الجداول والحذف المتسلسل)
+-- ==========================================================
+create index if not exists materials_created_by_idx      on public.materials (created_by);
+create index if not exists ncrs_checkpoint_idx           on public.ncrs (checkpoint);
+create index if not exists ncrs_created_by_idx           on public.ncrs (created_by);
+create index if not exists ncrs_unit_idx                 on public.ncrs (unit_id);
+create index if not exists profiles_crew_idx             on public.profiles (crew_id);
+create index if not exists project_stages_checkpoint_idx on public.project_stages (checkpoint);
+create index if not exists project_stages_crew_idx       on public.project_stages (crew_id);
+create index if not exists project_stages_updated_by_idx on public.project_stages (updated_by);
+create index if not exists projects_created_by_idx       on public.projects (created_by);
+create index if not exists stage_requests_reviewed_by_idx on public.stage_requests (reviewed_by);
+create index if not exists test_records_updated_by_idx   on public.test_records (updated_by);
+create index if not exists unit_checks_checkpoint_idx    on public.unit_checks (checkpoint);
+
+-- ==========================================================
+-- النسخ الاحتياطي التلقائي
+-- كل ليلة تُحفظ نسخة كاملة من كل جداول البيانات داخل القاعدة (آخر 30 نسخة تلقائية وآخر 10 يدوية).
+-- تحمي من الأخطاء: حذف بالخطأ، استيراد خاطئ، تعديل جماعي. ولا تحمي من فقدان المشروع كله،
+-- لذلك ينزّل المدير نسخة إلى جهازه أو Google Drive من صفحة "نسخة احتياطية" بانتظام.
+-- الصور (stage-photos) ليست ضمن النسخة.
+-- ==========================================================
+create table if not exists public.backups (
+  id          bigint generated always as identity primary key,
+  taken_at    timestamptz not null default now(),
+  kind        text not null check (kind in ('auto', 'manual')),
+  taken_by    uuid,   -- بلا مفتاح أجنبي: تبقى النسخة حتى لو حُذف المستخدم
+  counts      jsonb not null,
+  size_bytes  integer not null,
+  data        jsonb not null
+);
+create index if not exists backups_kind_at_idx on public.backups (kind, taken_at desc);
+alter table public.backups enable row level security;
+revoke all on public.backups from anon, authenticated;
+-- المدير يرى قائمة النسخ فقط، ومحتواها عبر backup_data() التي تسجّل كل تنزيل في سجل العمليات
+grant select (id, taken_at, kind, taken_by, counts, size_bytes) on public.backups to authenticated;
+drop policy if exists backups_select on public.backups;
+create policy backups_select on public.backups for select to authenticated using ((select public.is_admin()));
+
+create or replace function public.make_backup(p_kind text)
+returns bigint language plpgsql security definer set search_path = public as $$
+declare t text; r jsonb; d jsonb := '{}'; c jsonb := '{}'; new_id bigint;
+begin
+  for t in select k.relname from pg_class k join pg_namespace n on n.oid = k.relnamespace
+           where n.nspname = 'public' and k.relkind = 'r' and k.relname <> 'backups' order by 1 loop
+    execute format('select coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) from public.%I x', t) into r;
+    d := d || jsonb_build_object(t, r);
+    c := c || jsonb_build_object(t, jsonb_array_length(r));
+  end loop;
+  d := jsonb_build_object('app', 'surour', 'format', 1, 'taken_at', now(), 'tables', d);
+  insert into public.backups (kind, taken_by, counts, size_bytes, data)
+  values (p_kind, auth.uid(), c, octet_length(d::text), d) returning id into new_id;
+  delete from public.backups where kind = p_kind and id not in (
+    select id from public.backups where kind = p_kind order by taken_at desc, id desc
+    limit case when p_kind = 'auto' then 30 else 10 end);
+  return new_id;
+end $$;
+revoke execute on function public.make_backup(text) from public, anon, authenticated;
+
+create or replace function public.take_backup()
+returns bigint language plpgsql security definer set search_path = public as $$
+declare new_id bigint;
+begin
+  if not public.is_admin() then raise exception 'النسخ الاحتياطي للمدير فقط' using errcode = '42501'; end if;
+  if exists (select 1 from public.backups where kind = 'manual' and taken_at > now() - interval '2 minutes') then
+    raise exception 'أُخذت نسخة قبل أقل من دقيقتين، انتظر قليلاً';
+  end if;
+  new_id := public.make_backup('manual');
+  insert into public.audit_log (actor, table_name, row_id, action) values (auth.uid(), 'backups', new_id::text, 'INSERT');
+  return new_id;
+end $$;
+
+create or replace function public.backup_data(p_id bigint)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare d jsonb;
+begin
+  if not public.is_admin() then raise exception 'النسخ الاحتياطي للمدير فقط' using errcode = '42501'; end if;
+  select data into d from public.backups where id = p_id;
+  if d is null then raise exception 'النسخة غير موجودة'; end if;
+  insert into public.audit_log (actor, table_name, row_id, action) values (auth.uid(), 'backups', p_id::text, 'DOWNLOAD');
+  return d;
+end $$;
+revoke execute on function public.take_backup(), public.backup_data(bigint) from public, anon;
+grant execute on function public.take_backup(), public.backup_data(bigint) to authenticated;
+
+-- الجدولة: كل ليلة 23:00 UTC (الثانية فجراً بتوقيت بغداد). على PostgreSQL بلا pg_cron يُتخطّى هذا الجزء.
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
+    create extension if not exists pg_cron;
+    perform cron.schedule('surour-nightly-backup', '0 23 * * *', $q$select public.make_backup('auto')$q$);
+  else
+    raise notice 'pg_cron غير متوفر هنا: النسخ التلقائي الليلي لن يعمل';
+  end if;
+end $$;
 
 -- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:

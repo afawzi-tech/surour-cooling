@@ -37,13 +37,16 @@
   const RES_AR = { pass: 'ناجح', fail: 'فاشل', pending: 'معلّق', na: 'لا ينطبق' };
   const STATUS_AR = { 'Complete': 'مكتملة', 'In progress': 'جارية', 'Not started': 'لم تبدأ', 'Has failure': 'بها فشل' };
   const TABLES = { profiles: 'المستخدمون', projects: 'المشاريع', units: 'Villa Tracker', unit_checks: 'Villa Tracker',
-    test_records: 'Test Records', ncrs: 'NCR Register', materials: 'المواد', project_stages: 'مراحل العمل', crews: 'الفرق' };
-  const ACTIONS = { INSERT: 'إضافة', UPDATE: 'تعديل', DELETE: 'حذف' };
+    test_records: 'Test Records', ncrs: 'NCR Register', materials: 'المواد', project_stages: 'مراحل العمل', crews: 'الفرق', stage_requests: 'تقارير المراحل', backups: 'النسخ الاحتياطية' };
+  const ACTIONS = { INSERT: 'إضافة', UPDATE: 'تعديل', DELETE: 'حذف', DOWNLOAD: 'تنزيل' };
 
   const state = {
     sb: null, user: null, profile: null,
     projects: [], checkpoints: [], crews: [],
+    crewUnits: [],    // وحدات المجمّعات المسندة لكل فرقة (عرض crew_unit_stats)
     stages: {},       // لكل مشروع: { checkpoint: صف المرحلة }
+    requests: [],     // تقارير الفنيين (المعلّقة + آخر 30 يوماً)
+    people: {},       // أسماء المستخدمين: { id: الاسم }
     data: {}          // لكل مشروع: { units, tests: Map(unit_id), ncrs }
   };
   const role = () => state.profile?.role;
@@ -137,19 +140,33 @@
   }
 
   async function loadBase() {
-    const [projects, cps, stages, crews] = await Promise.all([
+    const since = new Date(Date.now() - 30 * 86400000).toISOString();
+    const [projects, cps, stages, crews, reqs, people] = await Promise.all([
       state.sb.from('projects').select('*').order('created_at'),
       state.sb.from('qc_checkpoints').select('*').order('position'),
       fetchAll((a, b) => state.sb.from('project_stages').select('*').range(a, b)),
-      state.sb.from('crews').select('*').order('name')]);
+      state.sb.from('crews').select('*').order('name'),
+      fetchAll((a, b) => state.sb.from('stage_requests').select('*').or(`status.eq.pending,requested_at.gte.${since}`).order('requested_at', { ascending: false }).range(a, b)),
+      state.sb.from('profiles').select('id, full_name')]);
     if (projects.error) throw projects.error;
     if (cps.error) throw cps.error;
     state.projects = projects.data;
     state.checkpoints = cps.data;
     if (crews.error) throw crews.error;
     state.crews = crews.data;
+    state.requests = reqs;
+    state.people = people.error ? {} : Object.fromEntries(people.data.map((x) => [x.id, x.full_name]));
     state.stages = {};
     stages.forEach((x) => { (state.stages[x.project_id] ||= {})[x.checkpoint] = x; });
+    await loadCrewUnits();
+  }
+
+  // أداء الفرق في المجمّعات: سطر لكل (فرقة، مجمّع) فيه عدد الوحدات والمكتملة والفاشلة والجارية
+  async function loadCrewUnits() {
+    state._cuAt = Date.now();
+    const r = await state.sb.from('crew_unit_stats').select('*');
+    if (r.error) { console.warn(r.error); return; }
+    state.crewUnits = r.data;
   }
 
   /* ---------- مراحل العمل على مستوى المشروع ---------- */
@@ -207,6 +224,8 @@
 
   /* ---------- التشغيل ---------- */
   async function boot() {
+    // منع فتح التطبيق داخل إطار في موقع آخر (حماية من خداع النقر). GitHub Pages لا يسمح بترويسة X-Frame-Options
+    if (window.top !== window.self) { clear(root).appendChild(h('p', { class: 'muted' }, 'افتح التطبيق من رابطه مباشرة.')); return; }
     const ok = cfg.supabaseUrl && !/YOUR-PROJECT/.test(cfg.supabaseUrl) && cfg.supabaseAnonKey && !/YOUR-ANON-KEY/.test(cfg.supabaseAnonKey);
     if (!ok || !window.supabase) return renderSetupNeeded();
     state.sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } });
@@ -300,6 +319,8 @@
     users: ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M2 21c0-4 3-6 7-6s7 2 7 6', 'M17 4a3.5 3.5 0 0 1 0 7', 'M19 15c2 .6 3 2.5 3 6'],
     audit: ['M4 4h16v16H4z', 'M8 9h8', 'M8 13h8', 'M8 17h5'],
     backup: ['M12 3v12', 'M7 10l5 5 5-5', 'M4 19h16'],
+    techs: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
+    reports: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M8 12l2.5 2.5L16 9', 'M8 18h8'],
     more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
   };
   function icon(k) {
@@ -316,28 +337,31 @@
       ['home', 'لوحة التحكم', true],
       ['projects', 'المشاريع', true],
       ['crews', 'الفرق والمقاولون', true],
+      ['techs', isStaff() ? 'أداء الفنيين' : 'أدائي', true],
       ['compounds', 'المجمّعات السكنية', true],
+      ['reports', 'سجل التقارير', true],
       ['users', 'المستخدمون', isAdmin()],
       ['audit', 'سجل العمليات', isAdmin()],
       ['backup', 'نسخة احتياطية', isStaff()]
     ].filter((x) => x[2]);
     const stay = (k) => (k === 'home' ? () => { state._stayHome = true; } : null);
-    const SHORT = { home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات' };
+    const SHORT = { home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات', techs: isStaff() ? 'الأداء' : 'أدائي' };
     const link = ([k, l]) => h('a', { href: '#/' + k, class: navOn === k ? 'on' : '', 'aria-current': navOn === k ? 'page' : null, onClick: stay(k), 'aria-label': l }, icon(k),
       h('span', { class: 'nl-full' }, l), SHORT[k] ? h('span', { class: 'nl-short', 'aria-hidden': 'true' }, SHORT[k]) : null);
     const me = h('div', { class: 'side-me' },
       h('span', { class: 'who' }, h('b', null, state.profile.full_name || state.user.email), h('small', null, ROLES[role()])),
       h('div', { class: 'row' },
         h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, 'aria-label': 'تبديل المظهر' }, 'المظهر'),
+        h('button', { class: 'btn ghost sm', type: 'button', onClick: changePassword }, 'كلمة المرور'),
         h('button', { class: 'btn ghost sm', type: 'button', onClick: signOut }, 'خروج')));
     // الهاتف: المشاريع والمجمّعات والفرق، والباقي مع الخروج تحت "المزيد"
     const rest = menu.slice(3);
     const more = h('details', { class: 'mb-more' },
       h('summary', { class: rest.some(([k]) => k === navOn) ? 'on' : '' }, icon('more'), h('span', null, 'المزيد')),
       h('div', { class: 'mb-sheet' }, rest.map(link), me.cloneNode(true)));
-    // cloneNode لا ينسخ الأحداث: نعيد ربط أزرار المظهر والخروج في نسخة الهاتف
+    // cloneNode لا ينسخ الأحداث: نعيد ربط أزرار المظهر وكلمة المرور والخروج في نسخة الهاتف
     const btns = more.querySelectorAll('.side-me button');
-    btns[0].onclick = toggleTheme; btns[1].onclick = signOut;
+    btns[0].onclick = toggleTheme; btns[1].onclick = changePassword; btns[2].onclick = signOut;
     return [
       h('aside', { class: 'side', 'aria-label': 'القائمة الرئيسية' },
         h('a', { href: '#/home', class: 'side-logo', onClick: stay('home') }, logo(), h('span', null, 'متابعة المشاريع')),
@@ -398,6 +422,32 @@
       h('p', { class: 'muted' }, 'تواصل مع المدير.'), h('button', { class: 'btn ghost', type: 'button', onClick: signOut }, 'خروج')));
   }
   async function signOut() { await state.sb.auth.signOut(); location.hash = ''; }
+
+  // كل مستخدم يغيّر كلمة مروره بنفسه، فلا تبقى الكلمة التي أرسلها المدير معروفة لغيره
+  const strongEnough = (p) => p.length >= 8 && p.length <= 72 && /[0-9]/.test(p) && /[A-Za-z]/.test(p);
+  function changePassword() {
+    const mk = (id, ac) => h('input', { type: 'password', id, dir: 'ltr', autocomplete: ac, maxlength: 72, required: true });
+    const cur = mk('pw-cur', 'current-password'), nw = mk('pw-new', 'new-password'), again = mk('pw-again', 'new-password');
+    const err = h('p', { class: 'err', role: 'alert' });
+    modal('تغيير كلمة المرور', h('div', { class: 'stack' },
+      field('كلمة المرور الحالية', cur),
+      field('كلمة المرور الجديدة', nw, { hint: '8 أحرف على الأقل، فيها حروف إنجليزية وأرقام' }),
+      field('أعد كتابة الجديدة', again), err),
+    [{ label: 'حفظ', cls: 'primary', run: async () => {
+      err.textContent = '';
+      if (!strongEnough(nw.value)) { err.textContent = 'كلمة المرور الجديدة 8 أحرف على الأقل، وفيها حروف إنجليزية وأرقام'; return false; }
+      if (nw.value !== again.value) { err.textContent = 'الكلمتان الجديدتان غير متطابقتين'; return false; }
+      if (nw.value === cur.value) { err.textContent = 'اختر كلمة مختلفة عن الحالية'; return false; }
+      // التأكد من الكلمة الحالية قبل التغيير، حتى لا يغيّرها من وجد الهاتف مفتوحاً
+      const chk = await state.sb.auth.signInWithPassword({ email: state.user.email, password: cur.value });
+      if (chk.error) { err.textContent = /Invalid login/i.test(chk.error.message) ? 'كلمة المرور الحالية غير صحيحة' : errText(chk.error); return false; }
+      const { error } = await state.sb.auth.updateUser({ password: nw.value });
+      if (error) { err.textContent = /weak|characters|short/i.test(error.message) ? 'كلمة المرور ضعيفة، اختر أقوى' : errText(error); return false; }
+      toast('تم تغيير كلمة المرور');
+      return true;
+    } }]);
+    setTimeout(() => cur.focus(), 0);
+  }
 
   /* ---------- عناصر مشتركة ---------- */
   function field(label, input, opts = {}) {
@@ -497,15 +547,17 @@
     const cpN = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
     const crews = state.crews.filter((c) => c.active);
     const people = working.reduce((a, w) => a + (w.x.crew || 0), 0);
-    const busy = crews.filter((c) => working.some((w) => w.x.crew_id === c.id));
+    const unitsAt = (c) => state.crewUnits.filter((x) => x.crew_id === c.id && x.in_progress > 0).map((x) => ({ ...x, p: state.projects.find((p) => p.id === x.project_id) })).filter((x) => x.p);
+    const busy = crews.filter((c) => working.some((w) => w.x.crew_id === c.id) || unitsAt(c).length);
     const crewsBox = h('section', { class: 'd2-crews' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'الفرق والمقاولون'),
       h('a', { href: '#/crews', class: 'link small' }, 'الأداء والتفاصيل')),
       crews.length ? [h('p', { class: 'd2-note' }, `${num(busy.length)} يعمل الآن، ${num(crews.length - busy.length)} متاح` + (people ? `. ${num(people)} كادر في المراحل الجارية` : '')),
         h('ul', { class: 'crew-list' }, [...busy, ...crews.filter((c) => !busy.includes(c))].map((c) => {
-          const at = working.filter((w) => w.x.crew_id === c.id);
-          return h('li', { class: at.length ? 'busy' : 'free' },
+          const at = working.filter((w) => w.x.crew_id === c.id), ua = unitsAt(c);
+          return h('li', { class: at.length || ua.length ? 'busy' : 'free' },
             h('span', { class: 'cr-name' }, h('b', null, c.name), h('small', null, KIND_AR[c.kind] + (c.leader ? ' · ' + c.leader : ''))),
-            h('span', { class: 'cr-where' }, at.length ? at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)) : 'متاحة'),
+            h('span', { class: 'cr-where' }, at.length || ua.length ? [...at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)),
+              ...ua.map((x) => h('a', { href: '#/project/' + x.p.id }, `${x.p.client} · ${unitWords(x.p).many} جارية: ${num(x.in_progress)}`))] : 'متاحة'),
             c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, c.phone) : null);
         }))]
         : h('p', { class: 'calm muted' }, isStaff() ? 'لا توجد فرق أو مقاولون بعد. أضفهم من صفحة "الفرق والمقاولون".' : 'لا توجد فرق أو مقاولون بعد.'));
@@ -574,6 +626,7 @@
       h('dl', { class: 'd2-stats' },
         stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
         stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('متأخرة', lateN, lateN ? 'bad' : 'muted', 'late'), stat('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'muted', 'attn')),
+      window.Reports ? window.Reports.homeBox() : null,
       h('section', { class: 'd2-pipe' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'أين تقف المشاريع'),
         h('span', { class: 'd2-note' }, 'عدد المشاريع عند كل مرحلة' + (rows.some((r) => r.compound) ? '. المجمّعات تُتابَع وحدةً وحدة في قسمها' : ''))), pipe),
       h('div', { class: 'd2-two' }, duesBox, crewsBox),
@@ -626,7 +679,8 @@
         const r = projInfo(p);
         const cur = r.sp?.cur && r.status !== 'done' ? r.sp.cur : null;
         const crew = cur?.s.crew_id ? crewOf(cur.s.crew_id) : null;
-        const crews = [...new Set(Object.values(state.stages[p.id] || {}).map((x) => x.crew_id).filter(Boolean))];
+        const crews = [...new Set([...Object.values(state.stages[p.id] || {}).map((x) => x.crew_id),
+          ...state.crewUnits.filter((x) => x.project_id === p.id).map((x) => x.crew_id)].filter(Boolean))];
         r.crew = crew; r.crews = crews; r.late = !!(r.sc && (r.sc.late || r.sc.behind));
         r.stagePos = r.status === 'done' ? 99 : cur ? cpN[cur.c.key].position : r.compound ? 50 : 0;
         r.hay = norm([p.client, p.customer_name, p.governorate, p.city, p.site_address, p.brand, PTYPES[p.project_type], crew?.name, crew?.leader,
@@ -836,13 +890,13 @@
       }));
 
       // ---- الفرق والمقاولون (على كل المشاريع، لأن الأداء لا يُقاس على جزء)
-      const crewRows = [['الاسم', 'النوع', 'الرئيس / المسؤول', 'الهاتف', 'المحافظات', 'فعّال', 'مراحل مكتملة', 'مراحل جارية', 'مشاريع', 'متوسط أيام المرحلة', 'اكتملت بعد موعد التسليم', 'يعمل الآن في'].map(H)];
+      const crewRows = [['الاسم', 'النوع', 'الرئيس / المسؤول', 'الهاتف', 'المحافظات', 'فعّال', 'مراحل مكتملة', 'مراحل جارية', 'مشاريع', 'متوسط أيام المرحلة', 'اكتملت بعد موعد التسليم', 'يعمل الآن في', 'وحدات المجمّعات', 'وحدات مكتملة', 'وحدات فيها فشل'].map(H)];
       const cpN = Object.fromEntries(cps.map((c) => [c.key, c.name_ar]));
       state.crews.forEach((c) => {
         const st = crewStats(c);
         crewRows.push([c.name, KIND_AR[c.kind], c.leader || '', c.phone || '', (c.governorates || []).join('، '), c.active ? 'نعم' : 'لا',
           st.done, st.ip, st.projects.size, st.avg === null ? '' : Math.round(st.avg * 10) / 10, st.afterDue,
-          st.at.map((w) => `${w.p.client} (${cpN[w.x.checkpoint]})`).join('، ')]);
+          st.at.map((w) => `${w.p.client} (${cpN[w.x.checkpoint]})`).join('، '), st.units.n, st.units.done, st.units.fail]);
       });
 
       const sheets = [
@@ -857,7 +911,7 @@
         sheets.push({ name: 'تفاصيل المراحل', rows: detRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:K${detRows.length}`, widths: [30, 6, 22, 11, 12, 12, 11, 24, 14, 9, 40],
           cf: [statusCF(`D2:D${detRows.length}`)] } });
       }
-      sheets.push({ name: 'الفرق والمقاولون', rows: crewRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:L${crewRows.length}`, widths: [26, 14, 20, 15, 24, 7, 12, 12, 9, 16, 20, 40] } });
+      sheets.push({ name: 'الفرق والمقاولون', rows: crewRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:O${crewRows.length}`, widths: [26, 14, 20, 15, 24, 7, 12, 12, 9, 16, 20, 40, 14, 13, 15] } });
 
       download(X.writeWorkbook(sheets), `sorror-projects-${today}.xlsx`);
       toast(`تم تنزيل ${list.length === all.length ? 'كل المشاريع' : `${list.length} من ${all.length} مشروع`}`);
@@ -1145,6 +1199,10 @@
       } else if (x.status === 'in_progress') { st.ip++; st.projects.add(p.id); st.at.push({ p, x }); }
     }));
     st.avg = st.days.length ? st.days.reduce((a, b) => a + b, 0) / st.days.length : null;
+    // المجمّعات: الوحدات المسندة للفرقة
+    const cu = state.crewUnits.filter((x) => x.crew_id === c.id).map((x) => ({ ...x, p: state.projects.find((p) => p.id === x.project_id) })).filter((x) => x.p);
+    st.units = { n: cu.reduce((a, x) => a + x.units, 0), done: cu.reduce((a, x) => a + x.done, 0),
+      fail: cu.reduce((a, x) => a + x.failing, 0), ip: cu.reduce((a, x) => a + x.in_progress, 0), at: cu };
     return st;
   }
   views.crews = {
@@ -1188,18 +1246,22 @@
         } }]);
       };
       const del = async (c) => {
-        if (!await window.UI.confirmBox({ title: 'حذف', body: `سيُحذف "${c.name}"، وتبقى المراحل المسندة له بدون منفّذ. الأفضل إلغاء تفعيله بدل الحذف حتى يبقى سجل أدائه.`, okText: 'حذف', danger: true })) return;
+        if (!await window.UI.confirmBox({ title: 'حذف', body: `سيُحذف "${c.name}"، وتبقى المراحل والوحدات المسندة له بدون منفّذ. الأفضل إلغاء تفعيله بدل الحذف حتى يبقى سجل أدائه.`, okText: 'حذف', danger: true })) return;
         const res = await state.sb.from('crews').delete().eq('id', c.id).select();
         if (res.error || !res.data?.length) return fail(res.error || 'permission denied');
-        state.crews = state.crews.filter((x) => x.id !== c.id); toast('تم الحذف'); render();
+        state.crews = state.crews.filter((x) => x.id !== c.id); state.crewUnits = state.crewUnits.filter((x) => x.crew_id !== c.id);
+        Object.values(state.data).forEach((d) => d.units.forEach((u) => { if (u.crew_id === c.id) u.crew_id = null; }));
+        toast('تم الحذف'); render();
       };
       const list = state.crews.filter((c) => tab === 'all' || c.kind === tab);
       const n = (k) => state.crews.filter((c) => c.kind === k).length;
+      if (Date.now() - (state._cuAt || 0) > 30000) loadCrewUnits().then(() => { if (location.hash.startsWith('#/crews')) render(); });
       const card = (c) => {
         const st = crewStats(c);
+        const busy = st.ip || st.units.ip;
         return h('li', { class: 'crew-card ' + c.kind + (c.active ? '' : ' off') },
           h('div', { class: 'cc-top' }, h('span', null, h('small', { class: 'kind-tag ' + c.kind }, KIND_AR[c.kind]), h('b', null, c.name)),
-            h('span', { class: 'chip ' + (st.ip ? 'st-in-progress' : '') }, !c.active ? 'غير فعّال' : st.ip ? 'يعمل الآن' : 'متاح')),
+            h('span', { class: 'chip ' + (busy ? 'st-in-progress' : '') }, !c.active ? 'غير فعّال' : busy ? 'يعمل الآن' : 'متاح')),
           c.leader || c.phone ? h('p', null, c.leader ? (c.kind === 'contractor' ? 'المسؤول: ' : 'الرئيس: ') + c.leader : '', c.leader && c.phone ? ' · ' : '',
             c.phone ? h('a', { href: 'tel:' + c.phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, c.phone) : null) : null,
           c.governorates?.length ? h('p', { class: 'cc-govs' }, c.governorates.join('، ')) : null,
@@ -1210,12 +1272,21 @@
             h('div', null, h('dd', null, st.avg === null ? '—' : num(Math.round(st.avg * 10) / 10)), h('dt', null, 'يوم للمرحلة')),
             h('div', { class: st.afterDue ? 'bad' : '' }, h('dd', null, num(st.afterDue)), h('dt', null, 'بعد موعد التسليم'))),
           st.at.length ? h('ul', { class: 'cc-at' }, st.at.map((w) => h('li', null, h('a', { href: '#/project/' + w.p.id }, w.p.client), ' · ' + cpN[w.x.checkpoint] + (w.x.crew ? ` · ${num(w.x.crew)} كادر` : '')))) : null,
+          st.units.n ? h('div', { class: 'cc-units' }, h('h3', null, 'في المجمّعات'),
+            h('dl', { class: 'perf' },
+              h('div', null, h('dd', null, num(st.units.n)), h('dt', null, 'وحدة مسندة')),
+              h('div', null, h('dd', null, num(st.units.done)), h('dt', null, 'مكتملة')),
+              h('div', null, h('dd', null, num(st.units.ip)), h('dt', null, 'جارية')),
+              h('div', { class: st.units.fail ? 'bad' : '' }, h('dd', null, num(st.units.fail)), h('dt', null, 'فيها فشل')),
+              h('div', null, h('dd', null, pctText(st.units.n ? st.units.done / st.units.n : 0)), h('dt', null, 'نسبة المكتمل'))),
+            h('ul', { class: 'cc-at' }, st.units.at.map((x) => { const W = unitWords(x.p);
+              return h('li', null, h('a', { href: '#/project/' + x.p.id }, x.p.client), ` · ${num(x.units)} ${W.one}، مكتملة ${num(x.done)}` + (x.failing ? `، ${num(x.failing)} فيها فشل` : '')); }))) : null,
           isStaff() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn sm', onClick: () => edit(c) }, 'تعديل'),
             isAdmin() ? h('button', { type: 'button', class: 'btn sm ghost danger-text', onClick: () => del(c) }, 'حذف') : null) : null);
       };
       return h('div', { class: 'stack crews-page' },
         h('div', { class: 'row between' }, h('h1', null, 'الفرق والمقاولون'), isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: () => edit() }, '+ إضافة') : null),
-        h('p', { class: 'muted' }, 'كل مرحلة في المشروع تُسند لمنفّذ: فرقة من فنيي الشركة أو مقاول تنفيذ. الأداء يُحسب من المراحل المسندة لكل منفّذ.'),
+        h('p', { class: 'muted' }, 'كل مرحلة في المشروع، وكل وحدة في المجمّعات، تُسند لمنفّذ: فرقة من فنيي الشركة أو مقاول تنفيذ. الأداء يُحسب من المراحل والوحدات المسندة لكل منفّذ.'),
         h('nav', { class: 'sheet-tabs' }, [['all', `الكل (${state.crews.length})`], ['internal', `فرق الشركة (${n('internal')})`], ['contractor', `المقاولون (${n('contractor')})`]].map(([k, l]) =>
           h('a', { href: '#/crews' + (k === 'all' ? '' : '/' + k), class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null }, l))),
         list.length ? h('ul', { class: 'crew-cards' }, list.map(card))
@@ -1240,14 +1311,14 @@
     gen();
     modal('مستخدم جديد', h('div', { class: 'form-grid' },
       field('الاسم', name, { wide: true }), field('البريد الإلكتروني', email, { wide: true }),
-      field('كلمة المرور', pass, { hint: '8 أحرف على الأقل، فيها أرقام وحروف' }),
+      field('كلمة المرور', pass, { hint: '8 أحرف على الأقل، فيها حروف إنجليزية وأرقام' }),
       h('div', { class: 'field' }, h('label', null, '\u00a0'), h('button', { type: 'button', class: 'btn', onClick: gen }, 'كلمة مرور جديدة')),
-      field('الدور', roleSel, { wide: true, hint: 'الفني يشاهد ويسجّل قراءات الفحص فقط' })),
+      field('الدور', roleSel, { wide: true, hint: 'الفني يشاهد، ويسجّل قراءات الفحص، ويبلّغ عن مراحل فرقته مع صورة. اختر فرقته من الجدول بعد الإنشاء' })),
     [{ label: 'إنشاء الحساب', cls: 'primary', run: async () => {
       const v = { full_name: name.value.trim(), email: email.value.trim().toLowerCase(), password: pass.value, role: roleSel.value };
       if (!v.full_name) { toast('اكتب الاسم', 'error'); return false; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.email)) { toast('البريد الإلكتروني غير صحيح', 'error'); return false; }
-      if (v.password.length < 8 || !/[0-9]/.test(v.password) || !/[^0-9]/.test(v.password)) { toast('كلمة المرور 8 أحرف على الأقل، وفيها أرقام وحروف', 'error'); return false; }
+      if (!strongEnough(v.password)) { toast('كلمة المرور 8 أحرف على الأقل، وفيها حروف إنجليزية وأرقام', 'error'); return false; }
       const { data, error } = await state.sb.functions.invoke('admin-create-user', { body: v });
       if (error) {
         let msg = '';
@@ -1255,7 +1326,7 @@
         toast(msg || errText(error), 'error'); return false;
       }
       // بطاقة الدخول تظهر مرة واحدة لترسلها للشخص
-      const text = `حسابك في تطبيق متابعة مشاريع سرور\nالرابط: ${location.origin}${location.pathname}\nالبريد: ${v.email}\nكلمة المرور: ${v.password}`;
+      const text = `حسابك في تطبيق متابعة مشاريع سرور\nالرابط: ${location.origin}${location.pathname}\nالبريد: ${v.email}\nكلمة المرور: ${v.password}\nبعد أول دخول غيّرها من زر "كلمة المرور" في القائمة.`;
       setTimeout(() => modal('تم إنشاء الحساب', h('div', { class: 'stack sm' },
         h('p', null, `أُنشئ حساب ${v.full_name} بدور ${ROLES[v.role]}. أرسل له بيانات الدخول برسالة خاصة:`),
         h('pre', { class: 'cred', dir: 'rtl' }, text),
@@ -1280,15 +1351,19 @@
       };
       return h('div', { class: 'stack' },
         h('div', { class: 'row between' }, h('h1', null, 'المستخدمون'), h('button', { type: 'button', class: 'btn primary', onClick: newUser }, '+ مستخدم جديد')),
-        h('p', { class: 'muted' }, 'غيّر الاسم أو الدور من الجدول ويُحفظ وحده. لإيقاف شخص ترك العمل، أزل علامة "مفعّل" بدل الحذف حتى تبقى سجلاته.'),
+        h('p', { class: 'muted' }, 'غيّر الاسم أو الدور أو الفرقة من الجدول ويُحفظ وحده. الفني يبلّغ عن بدء وإكمال المراحل المسندة لفرقته فقط. لإيقاف شخص ترك العمل، أزل علامة "مفعّل" بدل الحذف حتى تبقى سجلاته.'),
         h('section', { class: 'card' }, h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
-          h('thead', null, h('tr', null, h('th', null, 'الاسم'), h('th', null, 'الدور'), h('th', null, 'مفعّل'), h('th', null, 'أُضيف'))),
+          h('thead', null, h('tr', null, h('th', null, 'الاسم'), h('th', null, 'الدور'), h('th', null, 'الفرقة'), h('th', null, 'مفعّل'), h('th', null, 'أُضيف'))),
           h('tbody', null, data.map((u) => {
             const me = u.id === state.user.id;
             return h('tr', null,
               h('td', null, h('input', { value: u.full_name, maxlength: 120, 'aria-label': 'الاسم', onChange: (e) => save(u, { full_name: e.target.value.trim() }) })),
               h('td', null, h('select', { disabled: me, 'aria-label': 'الدور', onChange: (e) => save(u, { role: e.target.value }) },
                 Object.entries(ROLES).map(([v, l]) => h('option', { value: v, selected: u.role === v }, l)))),
+              // الفني يبلّغ عن مراحل فرقته فقط
+              h('td', null, h('select', { 'aria-label': 'الفرقة', onChange: (e) => save(u, { crew_id: e.target.value || null }) },
+                h('option', { value: '' }, 'بدون فرقة'),
+                state.crews.filter((c) => c.kind === 'internal' && (c.active || c.id === u.crew_id)).map((c) => h('option', { value: c.id, selected: u.crew_id === c.id }, c.name)))),
               h('td', null, h('input', { type: 'checkbox', checked: u.active, disabled: me, 'aria-label': 'مفعّل', onChange: (e) => save(u, { active: e.target.checked }) })),
               h('td', { dir: 'ltr' }, date(u.created_at)));
           }))))),
@@ -1298,10 +1373,13 @@
             ['عرض كل المشاريع والمراحل والفرق وبيانات العملاء', 1, 1, 1],
             ['تسجيل قراءات الفحص في المجمّعات', 1, 1, 1],
             ['إنشاء المشاريع وتعديل بياناتها ومواعيدها', 1, 1, 0],
+            ['التبليغ عن بدء أو إكمال مرحلة مسندة لفرقته (مع صورة)', 0, 0, 1],
+            ['الموافقة على تقارير الفنيين أو رفضها', 1, 1, 0],
             ['بدء المراحل وإكمالها وإسنادها لفرقة أو مقاول', 1, 1, 0],
             ['إضافة الفرق والمقاولين وتعديلهم', 1, 1, 0],
-            ['نتائج فحص الفلل، وNCR، واستيراد Excel، والنسخة الاحتياطية', 1, 1, 0],
-            ['حذف المشاريع والفرق، وإضافة المستخدمين، وسجل العمليات', 1, 0, 0]
+            ['أداء كل الفنيين (الفني يرى أداءه فقط)', 1, 1, 0],
+            ['نتائج فحص الفلل، وNCR، واستيراد Excel، وتنزيل البيانات', 1, 1, 0],
+            ['حذف المشاريع والفرق، وإضافة المستخدمين، وسجل العمليات، والنسخ الاحتياطية الكاملة', 1, 0, 0]
           ].map(([a, ...c]) => h('tr', null, h('td', null, a), c.map((x) => h('td', { class: x ? 'yes' : 'no' }, x ? '✓' : '—')))))))));
     }
   };
@@ -1339,29 +1417,74 @@
   };
 
   /* ---------- نسخة احتياطية ---------- */
+  const sizeText = (b) => (b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+  const daysAgoText = (x) => { const d = daysSince(x); return d === 0 ? 'اليوم' : d === 1 ? 'أمس' : `قبل ${daysAr(d)}`; };
   views.backup = {
     title: 'نسخة احتياطية', allow: isStaff,
-    render() {
-      const run = async (btn) => {
+    async render() {
+      const stamp = () => new Date().toISOString().slice(0, 10);
+      const save = (obj, name) => download(new Blob([JSON.stringify(obj)], { type: 'application/json' }), name);
+      // نسخة من المتصفح (المدير والمشرف): ما يقرؤه المستخدم من الجداول الأساسية
+      const quick = async (btn) => {
         btn.disabled = true;
         try {
           const all = (t) => fetchAll((a, b) => state.sb.from(t).select('*').range(a, b));
           const [units, checks, tests, ncrs, stages, crews] = await Promise.all([all('units'), all('unit_checks'), all('test_records'), all('ncrs'), all('project_stages'), all('crews')]);
-          download(new Blob([JSON.stringify({ app: 'surour-vrf-qc', version: 4, exported_at: new Date().toISOString(),
-            projects: state.projects, project_stages: stages, crews, units, unit_checks: checks, test_records: tests, ncrs }, null, 1)], { type: 'application/json' }),
-          `surour-backup-${todayStr()}.json`);
+          save({ app: 'surour-vrf-qc', version: 4, exported_at: new Date().toISOString(),
+            projects: state.projects, project_stages: stages, crews, units, unit_checks: checks, test_records: tests, ncrs }, `surour-backup-${stamp()}.json`);
           toast('تم التنزيل');
         } catch (e) { fail(e); }
         btn.disabled = false;
       };
-      return h('div', { class: 'stack' }, h('h1', null, 'نسخة احتياطية'),
-        h('section', { class: 'card' }, h('p', null, 'تنزيل كل البيانات في ملف JSON. لتنزيل مشروع كملف Excel افتح المشروع واضغط "تصدير Excel".'),
-          h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn primary', onClick: (e) => run(e.currentTarget) }, 'تنزيل'))));
+      const quickCard = h('section', { class: 'card' }, h('h2', null, isAdmin() ? 'تنزيل سريع' : 'تنزيل البيانات'),
+        h('p', { class: 'muted' }, 'المشاريع والمراحل والفرق وبيانات الفحص في ملف JSON. لتنزيل مشروع كملف Excel افتح المشروع واضغط "تصدير Excel".'),
+        h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn' + (isAdmin() ? '' : ' primary'), onClick: (e) => quick(e.currentTarget) }, 'تنزيل')));
+      if (!isAdmin()) return h('div', { class: 'stack' }, h('h1', null, 'نسخة احتياطية'), quickCard);
+
+      const { data, error } = await state.sb.from('backups').select('id, taken_at, kind, counts, size_bytes').order('taken_at', { ascending: false });
+      if (error) throw error;
+      const lastAuto = data.find((b) => b.kind === 'auto');
+      const stale = !lastAuto || daysSince(lastAuto.taken_at) > 2;
+      const get = async (b, btn) => {
+        btn.disabled = true;
+        try {
+          const r = await state.sb.rpc('backup_data', { p_id: b.id });
+          if (r.error) throw r.error;
+          save(r.data, `surour-full-backup-${String(b.taken_at).slice(0, 10)}-${b.id}.json`);
+          toast('تم التنزيل. احفظ الملف في Google Drive أو على جهازك');
+        } catch (e) { fail(e); }
+        btn.disabled = false;
+      };
+      const take = async (btn) => {
+        btn.disabled = true;
+        const r = await state.sb.rpc('take_backup');
+        if (r.error) { fail(r.error); btn.disabled = false; return; }
+        toast('أُخذت نسخة جديدة');
+        render();
+      };
+      const rowsOf = (c) => Object.values(c || {}).reduce((a, n) => a + Number(n || 0), 0);
+      return h('div', { class: 'stack' },
+        h('div', { class: 'row between' }, h('h1', null, 'نسخة احتياطية'),
+          h('button', { type: 'button', class: 'btn primary', onClick: (e) => take(e.currentTarget) }, 'خذ نسخة الآن')),
+        h('section', { class: 'card' + (stale ? ' warn' : '') },
+          h('h2', null, stale ? 'لا توجد نسخة تلقائية حديثة' : 'النسخ التلقائي يعمل'),
+          h('p', null, stale
+            ? 'المفروض أن تُحفظ نسخة كل ليلة. إذا استمر هذا التنبيه فأبلغ من يتولى الدعم التقني.'
+            : `آخر نسخة تلقائية ${daysAgoText(lastAuto.taken_at)} (${dateTime(lastAuto.taken_at)}). تُحفظ نسخة كاملة كل ليلة، وتبقى آخر 30 نسخة.`),
+          h('p', { class: 'muted' }, 'هذه النسخ محفوظة داخل قاعدة البيانات نفسها، فتنفع عند الحذف أو التعديل بالخطأ. لحماية أقوى، نزّل نسخة مرة في الشهر على الأقل واحفظها في Google Drive. الصور المرفقة بالتقارير ليست ضمن النسخة.')),
+        h('section', { class: 'card' }, h('h2', null, 'النسخ المحفوظة'),
+          data.length ? h('ul', { class: 'bk-list' }, data.map((b) => h('li', null,
+            h('div', null,
+              h('b', { dir: 'ltr' }, dateTime(b.taken_at)),
+              h('small', { class: 'muted' }, `${b.kind === 'auto' ? 'تلقائية' : 'يدوية'} · ${cntAr(Number(b.counts?.projects || 0), 'مشروع واحد', 'مشروعان', 'مشاريع', 'مشروعاً')} · ${num(rowsOf(b.counts))} سجل · `, h('span', { dir: 'ltr' }, sizeText(b.size_bytes)))),
+            h('button', { type: 'button', class: 'btn sm', onClick: (e) => get(b, e.currentTarget), 'aria-label': 'تنزيل نسخة ' + dateTime(b.taken_at) }, 'تنزيل'))))
+            : empty('لا توجد نسخ بعد', 'أول نسخة تلقائية تُحفظ الليلة، أو اضغط "خذ نسخة الآن".')),
+        quickCard);
     }
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));
