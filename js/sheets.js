@@ -255,16 +255,16 @@
       const r = await S.sb.from('project_stages').upsert(rows, { onConflict: 'project_id,checkpoint' }).select();
       if (r.error) { A.fail(r.error); return false; }
       r.data.forEach((x) => { (S.stages[p.id] ||= {})[x.checkpoint] = x; });
-      toast(crewId ? `أُسندت ${A.cntAr(keys.length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} إلى ${A.crewOf(crewId)?.name}` : `أُلغي إسناد ${A.cntAr(keys.length, 'مرحلة واحدة', 'مرحلتين', 'مراحل', 'مرحلة')}`);
+      toast(crewId ? `أُسندت ${A.cntAr(keys.length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} إلى ${A.crewOf(crewId)?.name}` : `أُزيل إسناد ${A.cntAr(keys.length, 'مرحلة واحدة', 'مرحلتين', 'مراحل', 'مرحلة')}`);
       A.render();
     };
     A.modal('إسناد المراحل لفرقة أو مقاول', h('div', { class: 'stack sm' },
       A.field('المنفّذ', team),
-      h('div', { class: 'row' }, h('b', null, 'المراحل'), h('button', { type: 'button', class: 'btn sm', onClick: () => all(true) }, 'تحديد الكل'), h('button', { type: 'button', class: 'btn sm', onClick: () => all(false) }, 'إلغاء التحديد')),
+      h('div', { class: 'row' }, h('b', null, 'المراحل'), h('button', { type: 'button', class: 'btn sm', onClick: () => all(true) }, 'تحديد الكل'), h('button', { type: 'button', class: 'btn sm', onClick: () => all(false) }, 'بدون تحديد')),
       h('div', { class: 'as-list' }, boxes)),
-    [{ label: 'إلغاء إسناد المحدد', cls: 'ghost danger-text', run: async () => {
+    [{ label: 'إزالة الإسناد من المحدد', cls: 'ghost danger-text', run: async () => {
       if (!picked().length) { toast('اختر مرحلة واحدة على الأقل', 'error'); return false; }
-      if (!await confirmBox({ title: 'إلغاء الإسناد', body: `ستصبح ${A.cntAr(picked().length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} بدون منفّذ.`, okText: 'إلغاء الإسناد', danger: true })) return false;
+      if (!await confirmBox({ title: 'إزالة الإسناد', body: `ستصبح ${A.cntAr(picked().length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} بدون منفّذ.`, okText: 'إزالة الإسناد', danger: true })) return false;
       return save(null);
     } },
     { label: 'إسناد', cls: 'primary', run: () => (team.value ? save(team.value) : (toast('اختر الفرقة أو المقاول أولاً', 'error'), false)) }]);
@@ -1125,7 +1125,8 @@
           validations: [{ sqref: `H6:H${NL}`, list: '"Open,Closed"' }, { sqref: `C6:C${NL}`, list: `${VT}!$A$5:$A$${L}` }, { sqref: `D6:D${NL}`, list: `${VT}!$D$4:$P$4` }],
           cf: [{ sqref: `H6:H${NL}`, rules: [{ formula: '"Open"', dxf: 1 }, { formula: '"Closed"', dxf: 0 }] }] } }
       ]);
-      A.download(blob, `${p.client.replace(/[\\/:*?"<>|]/g, ' ').slice(0, 60)} - VRF_QC_Tracker - ${today()}.xlsx`);
+      // اسم إنجليزي: بعض المتصفحات تتجاهل الأسماء العربية فينزل الملف باسم "download" بلا امتداد
+      A.download(blob, `VRF_QC_Tracker-${today()}.xlsx`);
       toast('تم تنزيل ملف Excel');
     } catch (e) { A.fail(e); }
   }

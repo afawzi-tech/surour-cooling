@@ -613,7 +613,8 @@
   // توحيد الحروف للبحث: أ إ آ ← ا، ة ← ه، ى ← ي، وحذف التشكيل والتطويل
   const norm = (t) => String(t || '').toLowerCase().normalize('NFKD').replace(/[ً-ٰٟـ]/g, '')
     .replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/ؤ/g, 'و').replace(/ئ/g, 'ي').replace(/\s+/g, ' ').trim();
-  const digits = (t) => String(t || '').replace(/[^0-9]/g, '');
+  // أرقام لوحة المفاتيح العربية ٠-٩ و۰-۹ تُعامل مثل 0-9
+  const digits = (t) => String(t || '').replace(/[٠-٩]/g, (c) => c.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (c) => c.charCodeAt(0) - 0x6F0).replace(/[^0-9]/g, '');
 
   views.projects = {
     title: 'المشاريع',
@@ -668,7 +669,9 @@
           const words = norm(F0.q).split(' ').filter(Boolean);
           const dq = digits(F0.q);
           const phoneHit = dq.length >= 4 && r.phone.includes(dq);
-          if (!phoneHit && !words.every((w) => r.hay.includes(w))) return false;
+          // الكلمات غير الرقمية تبقى شرطاً حتى مع تطابق الهاتف ("البصرة 0770" لا يُظهر مشروع بغداد)
+          const textWords = words.filter((w) => !/^[0-9٠-٩۰-۹+\-()]+$/.test(w));
+          if (phoneHit ? !textWords.every((w) => r.hay.includes(w)) : !words.every((w) => r.hay.includes(w))) return false;
         }
         return true;
       };
