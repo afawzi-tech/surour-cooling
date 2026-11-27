@@ -600,7 +600,7 @@
   }
 
   function lineChart(pts) {
-    const W = 360, H = 170, L = 34, R = 14, T = 26, B = 26;
+    const W = 360, H = 172, L = 36, R = 30, T = 26, B = 28;
     const top = Math.max(...pts.map((p) => p.v));
     const stepV = top <= 0.4 ? 0.1 : 0.2;
     const max = Math.max(stepV, Math.ceil(top / stepV - 1e-9) * stepV);
@@ -628,7 +628,7 @@
   function donut(parts, centerTop, centerSub) {
     const total = parts.reduce((a, p) => a + p.n, 0) || 1, C = 2 * Math.PI * 42;
     let off = 0;
-    return sv('svg', { viewBox: '0 0 120 120', class: 'dn', role: 'img', 'aria-label': parts.map((p) => `${p.label} ${p.n}`).join('، ') },
+    return sv('svg', { viewBox: '0 0 120 120', class: 'dnut', role: 'img', 'aria-label': parts.map((p) => `${p.label} ${p.n}`).join('، ') },
       sv('circle', { cx: 60, cy: 60, r: 42, class: 'dn-track' }),
       parts.filter((p) => p.n).map((p) => {
         const len = (p.n / total) * C;
