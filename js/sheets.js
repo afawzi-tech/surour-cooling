@@ -8,7 +8,7 @@
   'use strict';
 
   const UI = window.UI;
-  const { h, clear, toast, confirmBox, num, date } = UI;
+  const { h, clear, toast, confirmBox, num } = UI;
   const A = window.App;
   const S = A.state;
   const X = window.XLSX_LITE;
@@ -1024,13 +1024,6 @@
       S.projects = S.projects.filter((x) => x.id !== p.id); delete S.data[p.id];
       S._stayHome = true; A.go('home');
     };
-    const rename = async (e) => {
-      const v = e.target.value.trim();
-      if (!v) { e.target.value = p.client; return; }
-      const r = await S.sb.from('projects').update({ client: v }).eq('id', p.id).select().maybeSingle();
-      if (r.error || !r.data) return A.fail(r.error || 'permission denied');
-      Object.assign(p, r.data); toast('تم تغيير الاسم');
-    };
     return h('div', { class: 'stack guide' },
       h('p', null, `سطر واحد لكل ${W.one}. تحدّثه بعد كل فحص، ولوحة التحكم والتنبيهات تتحدث وحدها.`),
       h('h3', null, 'كيف يعمل'),
@@ -1329,7 +1322,7 @@
       for (const t of tests) {
         const u = byCode.get(t.code);
         if (!u) { errors.push(t.code + `: ${W.the} غير موجودة (Test Records)`); continue; }
-        const { code, ...row } = t;
+        const { code: _code, ...row } = t;
         const r = await S.sb.from('test_records').upsert({ ...row, unit_id: u.id }, { onConflict: 'unit_id' });
         if (r.error) errors.push(t.code + ': ' + A.errText(r.error)); else tDone++;
       }
@@ -1344,7 +1337,7 @@
       for (const x of ncrs) {
         const u = byCode.get(x.code);
         if (!u) { errors.push(x.code + `: ${W.the} غير موجودة (NCR)`); continue; }
-        const { code, ...row } = x;
+        const { code: _code, ...row } = x;
         const no = row.ncr_no || nextNcrNo([...byNo.keys()]);
         const r = byNo.has(no)
           ? await S.sb.from('ncrs').update({ ...row, ncr_no: no, unit_id: u.id }).eq('id', byNo.get(no))
