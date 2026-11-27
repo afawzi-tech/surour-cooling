@@ -43,6 +43,7 @@
   const state = {
     sb: null, user: null, profile: null,
     projects: [], checkpoints: [], crews: [],
+    crewUnits: [],    // وحدات المجمّعات المسندة لكل فرقة (عرض crew_unit_stats)
     stages: {},       // لكل مشروع: { checkpoint: صف المرحلة }
     requests: [],     // تقارير الفنيين (المعلّقة + آخر 30 يوماً)
     people: {},       // أسماء المستخدمين: { id: الاسم }
@@ -157,6 +158,15 @@
     state.people = people.error ? {} : Object.fromEntries(people.data.map((x) => [x.id, x.full_name]));
     state.stages = {};
     stages.forEach((x) => { (state.stages[x.project_id] ||= {})[x.checkpoint] = x; });
+    await loadCrewUnits();
+  }
+
+  // أداء الفرق في المجمّعات: سطر لكل (فرقة، مجمّع) فيه عدد الوحدات والمكتملة والفاشلة والجارية
+  async function loadCrewUnits() {
+    state._cuAt = Date.now();
+    const r = await state.sb.from('crew_unit_stats').select('*');
+    if (r.error) { console.warn(r.error); return; }
+    state.crewUnits = r.data;
   }
 
   /* ---------- مراحل العمل على مستوى المشروع ---------- */
@@ -503,15 +513,17 @@
     const cpN = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
     const crews = state.crews.filter((c) => c.active);
     const people = working.reduce((a, w) => a + (w.x.crew || 0), 0);
-    const busy = crews.filter((c) => working.some((w) => w.x.crew_id === c.id));
+    const unitsAt = (c) => state.crewUnits.filter((x) => x.crew_id === c.id && x.in_progress > 0).map((x) => ({ ...x, p: state.projects.find((p) => p.id === x.project_id) })).filter((x) => x.p);
+    const busy = crews.filter((c) => working.some((w) => w.x.crew_id === c.id) || unitsAt(c).length);
     const crewsBox = h('section', { class: 'd2-crews' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'الفرق والمقاولون'),
       h('a', { href: '#/crews', class: 'link small' }, 'الأداء والتفاصيل')),
       crews.length ? [h('p', { class: 'd2-note' }, `${num(busy.length)} يعمل الآن، ${num(crews.length - busy.length)} متاح` + (people ? `. ${num(people)} كادر في المراحل الجارية` : '')),
         h('ul', { class: 'crew-list' }, [...busy, ...crews.filter((c) => !busy.includes(c))].map((c) => {
-          const at = working.filter((w) => w.x.crew_id === c.id);
-          return h('li', { class: at.length ? 'busy' : 'free' },
+          const at = working.filter((w) => w.x.crew_id === c.id), ua = unitsAt(c);
+          return h('li', { class: at.length || ua.length ? 'busy' : 'free' },
             h('span', { class: 'cr-name' }, h('b', null, c.name), h('small', null, KIND_AR[c.kind] + (c.leader ? ' · ' + c.leader : ''))),
-            h('span', { class: 'cr-where' }, at.length ? at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)) : 'متاحة'),
+            h('span', { class: 'cr-where' }, at.length || ua.length ? [...at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)),
+              ...ua.map((x) => h('a', { href: '#/project/' + x.p.id }, `${x.p.client} · ${unitWords(x.p).many} جارية: ${num(x.in_progress)}`))] : 'متاحة'),
             c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone, dir: 'ltr' }, c.phone) : null);
         }))]
         : h('p', { class: 'calm muted' }, isStaff() ? 'لا توجد فرق أو مقاولون بعد. أضفهم من صفحة "الفرق والمقاولون".' : 'لا توجد فرق أو مقاولون بعد.'));
@@ -632,7 +644,8 @@
         const r = projInfo(p);
         const cur = r.sp?.cur && r.status !== 'done' ? r.sp.cur : null;
         const crew = cur?.s.crew_id ? crewOf(cur.s.crew_id) : null;
-        const crews = [...new Set(Object.values(state.stages[p.id] || {}).map((x) => x.crew_id).filter(Boolean))];
+        const crews = [...new Set([...Object.values(state.stages[p.id] || {}).map((x) => x.crew_id),
+          ...state.crewUnits.filter((x) => x.project_id === p.id).map((x) => x.crew_id)].filter(Boolean))];
         r.crew = crew; r.crews = crews; r.late = !!(r.sc && (r.sc.late || r.sc.behind));
         r.stagePos = r.status === 'done' ? 99 : cur ? cpN[cur.c.key].position : r.compound ? 50 : 0;
         r.hay = norm([p.client, p.customer_name, p.governorate, p.city, p.site_address, p.brand, PTYPES[p.project_type], crew?.name, crew?.leader,
@@ -840,13 +853,13 @@
       }));
 
       // ---- الفرق والمقاولون (على كل المشاريع، لأن الأداء لا يُقاس على جزء)
-      const crewRows = [['الاسم', 'النوع', 'الرئيس / المسؤول', 'الهاتف', 'المحافظات', 'فعّال', 'مراحل مكتملة', 'مراحل جارية', 'مشاريع', 'متوسط أيام المرحلة', 'اكتملت بعد موعد التسليم', 'يعمل الآن في'].map(H)];
+      const crewRows = [['الاسم', 'النوع', 'الرئيس / المسؤول', 'الهاتف', 'المحافظات', 'فعّال', 'مراحل مكتملة', 'مراحل جارية', 'مشاريع', 'متوسط أيام المرحلة', 'اكتملت بعد موعد التسليم', 'يعمل الآن في', 'وحدات المجمّعات', 'وحدات مكتملة', 'وحدات فيها فشل'].map(H)];
       const cpN = Object.fromEntries(cps.map((c) => [c.key, c.name_ar]));
       state.crews.forEach((c) => {
         const st = crewStats(c);
         crewRows.push([c.name, KIND_AR[c.kind], c.leader || '', c.phone || '', (c.governorates || []).join('، '), c.active ? 'نعم' : 'لا',
           st.done, st.ip, st.projects.size, st.avg === null ? '' : Math.round(st.avg * 10) / 10, st.afterDue,
-          st.at.map((w) => `${w.p.client} (${cpN[w.x.checkpoint]})`).join('، ')]);
+          st.at.map((w) => `${w.p.client} (${cpN[w.x.checkpoint]})`).join('، '), st.units.n, st.units.done, st.units.fail]);
       });
 
       const sheets = [
@@ -861,7 +874,7 @@
         sheets.push({ name: 'تفاصيل المراحل', rows: detRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:K${detRows.length}`, widths: [30, 6, 22, 11, 12, 12, 11, 24, 14, 9, 40],
           cf: [statusCF(`D2:D${detRows.length}`)] } });
       }
-      sheets.push({ name: 'الفرق والمقاولون', rows: crewRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:L${crewRows.length}`, widths: [26, 14, 20, 15, 24, 7, 12, 12, 9, 16, 20, 40] } });
+      sheets.push({ name: 'الفرق والمقاولون', rows: crewRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:O${crewRows.length}`, widths: [26, 14, 20, 15, 24, 7, 12, 12, 9, 16, 20, 40, 14, 13, 15] } });
 
       download(X.writeWorkbook(sheets), `sorror-projects-${today}.xlsx`);
       toast(`تم تنزيل ${list.length === all.length ? 'كل المشاريع' : `${list.length} من ${all.length} مشروع`}`);
@@ -1149,6 +1162,10 @@
       } else if (x.status === 'in_progress') { st.ip++; st.projects.add(p.id); st.at.push({ p, x }); }
     }));
     st.avg = st.days.length ? st.days.reduce((a, b) => a + b, 0) / st.days.length : null;
+    // المجمّعات: الوحدات المسندة للفرقة
+    const cu = state.crewUnits.filter((x) => x.crew_id === c.id).map((x) => ({ ...x, p: state.projects.find((p) => p.id === x.project_id) })).filter((x) => x.p);
+    st.units = { n: cu.reduce((a, x) => a + x.units, 0), done: cu.reduce((a, x) => a + x.done, 0),
+      fail: cu.reduce((a, x) => a + x.failing, 0), ip: cu.reduce((a, x) => a + x.in_progress, 0), at: cu };
     return st;
   }
   views.crews = {
@@ -1192,18 +1209,22 @@
         } }]);
       };
       const del = async (c) => {
-        if (!await window.UI.confirmBox({ title: 'حذف', body: `سيُحذف "${c.name}"، وتبقى المراحل المسندة له بدون منفّذ. الأفضل إلغاء تفعيله بدل الحذف حتى يبقى سجل أدائه.`, okText: 'حذف', danger: true })) return;
+        if (!await window.UI.confirmBox({ title: 'حذف', body: `سيُحذف "${c.name}"، وتبقى المراحل والوحدات المسندة له بدون منفّذ. الأفضل إلغاء تفعيله بدل الحذف حتى يبقى سجل أدائه.`, okText: 'حذف', danger: true })) return;
         const res = await state.sb.from('crews').delete().eq('id', c.id).select();
         if (res.error || !res.data?.length) return fail(res.error || 'permission denied');
-        state.crews = state.crews.filter((x) => x.id !== c.id); toast('تم الحذف'); render();
+        state.crews = state.crews.filter((x) => x.id !== c.id); state.crewUnits = state.crewUnits.filter((x) => x.crew_id !== c.id);
+        Object.values(state.data).forEach((d) => d.units.forEach((u) => { if (u.crew_id === c.id) u.crew_id = null; }));
+        toast('تم الحذف'); render();
       };
       const list = state.crews.filter((c) => tab === 'all' || c.kind === tab);
       const n = (k) => state.crews.filter((c) => c.kind === k).length;
+      if (Date.now() - (state._cuAt || 0) > 30000) loadCrewUnits().then(() => { if (location.hash.startsWith('#/crews')) render(); });
       const card = (c) => {
         const st = crewStats(c);
+        const busy = st.ip || st.units.ip;
         return h('li', { class: 'crew-card ' + c.kind + (c.active ? '' : ' off') },
           h('div', { class: 'cc-top' }, h('span', null, h('small', { class: 'kind-tag ' + c.kind }, KIND_AR[c.kind]), h('b', null, c.name)),
-            h('span', { class: 'chip ' + (st.ip ? 'st-in-progress' : '') }, !c.active ? 'غير فعّال' : st.ip ? 'يعمل الآن' : 'متاح')),
+            h('span', { class: 'chip ' + (busy ? 'st-in-progress' : '') }, !c.active ? 'غير فعّال' : busy ? 'يعمل الآن' : 'متاح')),
           c.leader || c.phone ? h('p', null, c.leader ? (c.kind === 'contractor' ? 'المسؤول: ' : 'الرئيس: ') + c.leader : '', c.leader && c.phone ? ' · ' : '',
             c.phone ? h('a', { href: 'tel:' + c.phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, c.phone) : null) : null,
           c.governorates?.length ? h('p', { class: 'cc-govs' }, c.governorates.join('، ')) : null,
@@ -1214,12 +1235,21 @@
             h('div', null, h('dd', null, st.avg === null ? '—' : num(Math.round(st.avg * 10) / 10)), h('dt', null, 'يوم للمرحلة')),
             h('div', { class: st.afterDue ? 'bad' : '' }, h('dd', null, num(st.afterDue)), h('dt', null, 'بعد موعد التسليم'))),
           st.at.length ? h('ul', { class: 'cc-at' }, st.at.map((w) => h('li', null, h('a', { href: '#/project/' + w.p.id }, w.p.client), ' · ' + cpN[w.x.checkpoint] + (w.x.crew ? ` · ${num(w.x.crew)} كادر` : '')))) : null,
+          st.units.n ? h('div', { class: 'cc-units' }, h('h3', null, 'في المجمّعات'),
+            h('dl', { class: 'perf' },
+              h('div', null, h('dd', null, num(st.units.n)), h('dt', null, 'وحدة مسندة')),
+              h('div', null, h('dd', null, num(st.units.done)), h('dt', null, 'مكتملة')),
+              h('div', null, h('dd', null, num(st.units.ip)), h('dt', null, 'جارية')),
+              h('div', { class: st.units.fail ? 'bad' : '' }, h('dd', null, num(st.units.fail)), h('dt', null, 'فيها فشل')),
+              h('div', null, h('dd', null, pctText(st.units.n ? st.units.done / st.units.n : 0)), h('dt', null, 'نسبة المكتمل'))),
+            h('ul', { class: 'cc-at' }, st.units.at.map((x) => { const W = unitWords(x.p);
+              return h('li', null, h('a', { href: '#/project/' + x.p.id }, x.p.client), ` · ${num(x.units)} ${W.one}، مكتملة ${num(x.done)}` + (x.failing ? `، ${num(x.failing)} فيها فشل` : '')); }))) : null,
           isStaff() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn sm', onClick: () => edit(c) }, 'تعديل'),
             isAdmin() ? h('button', { type: 'button', class: 'btn sm ghost danger-text', onClick: () => del(c) }, 'حذف') : null) : null);
       };
       return h('div', { class: 'stack crews-page' },
         h('div', { class: 'row between' }, h('h1', null, 'الفرق والمقاولون'), isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: () => edit() }, '+ إضافة') : null),
-        h('p', { class: 'muted' }, 'كل مرحلة في المشروع تُسند لمنفّذ: فرقة من فنيي الشركة أو مقاول تنفيذ. الأداء يُحسب من المراحل المسندة لكل منفّذ.'),
+        h('p', { class: 'muted' }, 'كل مرحلة في المشروع، وكل وحدة في المجمّعات، تُسند لمنفّذ: فرقة من فنيي الشركة أو مقاول تنفيذ. الأداء يُحسب من المراحل والوحدات المسندة لكل منفّذ.'),
         h('nav', { class: 'sheet-tabs' }, [['all', `الكل (${state.crews.length})`], ['internal', `فرق الشركة (${n('internal')})`], ['contractor', `المقاولون (${n('contractor')})`]].map(([k, l]) =>
           h('a', { href: '#/crews' + (k === 'all' ? '' : '/' + k), class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null }, l))),
         list.length ? h('ul', { class: 'crew-cards' }, list.map(card))
@@ -1371,7 +1401,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));
