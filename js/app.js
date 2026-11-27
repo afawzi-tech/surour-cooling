@@ -700,8 +700,10 @@
           h('td', { class: 'c-pct', 'data-l': 'الإنجاز' }, h('span', { class: 'pj-prog' }, h('span', { class: 'st-bar' }, h('span', { style: { width: (r.pct * 100).toFixed(1) + '%' } })), h('b', null, pctText(r.pct)))),
           h('td', { class: 'c-due' + (r.sc?.late ? ' late' : ''), 'data-l': 'التسليم' }, p.due_date ? [h('span', { dir: 'ltr' }, p.due_date), h('small', null, r.due)] : h('span', { class: 'muted' }, '—')));
       };
+      let shown = [];
       const draw = () => {
         const list = rows.filter(hit).sort((a, b) => SORTS[F0.sort](a, b) * F0.dir);
+        shown = list;
         drawHead();
         clear(tbody).append(...list.map(row));
         if (!list.length) tbody.append(h('tr', null, h('td', { colspan: COLS.length, class: 'pl-empty' },
@@ -733,12 +735,131 @@
       const onKey = (e) => { if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement?.tagName || '')) { e.preventDefault(); search.focus(); } };
       document.removeEventListener('keydown', state._plKey || (() => {})); state._plKey = onKey; document.addEventListener('keydown', onKey);
       return h('div', { class: 'stack plist' },
-        h('div', { class: 'row between' }, h('h1', null, 'المشاريع'), isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: newProject }, '+ مشروع جديد') : null),
+        h('div', { class: 'row between' }, h('h1', null, 'المشاريع'),
+          h('div', { class: 'row' },
+            h('button', { type: 'button', class: 'btn', title: 'تنزيل المشاريع الظاهرة كملف Excel', onClick: (e) => exportProjects(shown, rows, F0, e.currentTarget) }, 'تصدير Excel'),
+            isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: newProject }, '+ مشروع جديد') : null)),
         h('div', { class: 'pl-tools' }, h('div', { class: 'pl-search-wrap' }, search), h('div', { class: 'pl-filters' }, filters, clearBtn)),
         count,
         h('div', { class: 'pl-table-wrap' }, h('table', { class: 'pl-table' }, h('caption', { class: 'sr-only' }, 'قائمة المشاريع. اضغط عنوان أي عمود للترتيب.'), h('thead', null, head), tbody)));
     }
   };
+
+  /* ---------- تصدير المشاريع إلى Excel ----------
+     خمس أوراق: الملخّص، المشاريع، مراحل المشاريع (جدول)، تفاصيل المراحل، الفرق والمقاولون.
+     يصدّر المشاريع الظاهرة حسب البحث والتصفية، ويكتب التصفية في الملخّص. */
+  function exportProjects(list, all, F0, btn) {
+    const X = window.XLSX_LITE;
+    if (!list.length) return toast('لا توجد مشاريع ظاهرة للتصدير. امسح التصفية أولاً.', 'error');
+    if (btn) btn.disabled = true;
+    try {
+      const cps = state.checkpoints;
+      const ST = { not_started: 'لم تبدأ', in_progress: 'جارية', done: 'مكتملة', na: 'لا تنطبق' };
+      const PST = { not_started: 'لم يبدأ', in_progress: 'جارٍ', done: 'مكتمل' };
+      // تاريخ نصي ← رقم تاريخ Excel حقيقي (حتى يُرتَّب ويُحسب)
+      const d = (x) => { if (!x) return ''; const [y, m, dd] = String(x).slice(0, 10).split('-').map(Number); return { v: (Date.UTC(y, m - 1, dd) - Date.UTC(1899, 11, 30)) / 86400000, s: 'date' }; };
+      const H = (t) => ({ v: t, s: 'header' });
+      const today = todayStr();
+      const statusCF = (ref) => ({ sqref: ref, rules: [{ dxf: 0, formula: '"مكتملة"' }, { dxf: 2, formula: '"جارية"' }, { dxf: 3, formula: '"لا تنطبق"' }, { dxf: 0, formula: '"مكتمل"' }, { dxf: 2, formula: '"جارٍ"' }] });
+
+      // ---- الملخّص
+      const n = (fn) => list.filter(fn).length;
+      const late = (r) => !!(r.sc && (r.sc.late || r.sc.behind));
+      const desc = [F0.q ? `بحث: ${F0.q}` : '', F0.st ? `الحالة: ${{ in_progress: 'جارية', not_started: 'لم تبدأ', done: 'مكتملة', late: 'متأخرة', attn: 'تحتاج انتباهك' }[F0.st]}` : '',
+        F0.gov ? `المحافظة: ${F0.gov === '-' ? 'بلا محافظة' : F0.gov}` : '', F0.brand ? `الماركة: ${F0.brand}` : '', F0.type ? `النوع: ${PTYPES[F0.type]}` : '',
+        F0.crew ? `المنفّذ: ${crewOf(F0.crew)?.name || ''}` : ''].filter(Boolean).join('، ');
+      const sumRows = [
+        [{ v: 'مصاعد السرور - تقرير المشاريع', s: 'title' }],
+        ['تاريخ التصدير', d(today)],
+        ['المشاريع في الملف', desc ? `${list.length} من ${all.length} (${desc})` : `كل المشاريع (${all.length})`],
+        [],
+        [H('المؤشر'), H('العدد')],
+        ['المشاريع', list.length], ['جارية', n((r) => r.status === 'in_progress')], ['مكتملة', n((r) => r.status === 'done')],
+        ['لم تبدأ', n((r) => r.status === 'not_started')], ['متأخرة (فات التسليم أو متأخرة عن الجدول)', n(late)], ['تحتاج انتباهك', n((r) => r.why.length)],
+        ['متوسط الإنجاز', { v: list.reduce((a, r) => a + r.pct, 0) / list.length, s: 'pct' }],
+        [],
+        [{ v: 'التعريفات', s: 'header' }, { v: '', s: 'header' }],
+        ['الإنجاز', 'المراحل المكتملة ÷ المراحل التي تنطبق (13 ناقص "لا تنطبق"). للمجمّع: نسبة فحوصات الوحدات الناجحة.'],
+        ['متأخر', 'فات تاريخ التسليم والمشروع لم يكتمل.'],
+        ['متأخر عن الجدول', `الإنجاز أقل من نسبة الوقت المنقضي (من البدء المخطط إلى التسليم) بـ${BEHIND_GAP * 100} نقطة أو أكثر.`]
+      ];
+
+      // ---- المشاريع (الإنجاز بمعادلة حقيقية للمشاريع العادية)
+      const pHead = ['المشروع', 'النوع', 'المحافظة', 'المدينة', 'الماركة', 'العميل', 'هاتف العميل', 'عنوان الموقع', 'رابط الخريطة', 'تاريخ العقد',
+        'البدء المخطط', 'التسليم', 'حالة المشروع', 'المرحلة الحالية', 'المنفّذ الحالي', 'مراحل مكتملة', 'مراحل تنطبق', 'الإنجاز', 'المتوقع حسب الوقت', 'الموعد', 'أيام (+ متبقية / − تأخير)', 'يحتاج انتباهاً'];
+      const projRows = [pHead.map(H)];
+      list.forEach((r, i) => {
+        const p = r.p, row = i + 2;
+        const cur = r.sp?.cur && r.status !== 'done' ? r.sp.cur : null;
+        const crew = cur?.s.crew_id ? crewOf(cur.s.crew_id) : null;
+        const sc = r.sc || {};
+        projRows.push([
+          p.client, r.compound ? PTYPES.compound : PTYPES[p.project_type] || '', p.governorate || '', p.city || '', p.brand || '',
+          p.customer_name || '', p.customer_phone || '', p.site_address || '', p.map_url || '', d(p.contract_date), d(p.start_date), d(p.due_date),
+          PST[r.status], r.compound ? r.now : (r.status === 'done' ? 'اكتملت كل المراحل' : cur ? cur.c.name_ar : ''), crew ? `${crew.name} (${KIND_AR[crew.kind]})` : '',
+          r.compound ? '' : r.sp.done, r.compound ? '' : r.sp.total,
+          r.compound ? { v: r.pct, s: 'pct' } : { f: `IFERROR(P${row}/Q${row},0)`, v: r.pct, s: 'pct' },
+          sc.expected != null ? { v: sc.expected, s: 'pct' } : '',
+          !sc.has ? '' : r.status === 'done' ? 'مكتمل' : sc.late ? 'متأخر' : sc.behind ? 'متأخر عن الجدول' : 'حسب الجدول',
+          sc.has && r.status !== 'done' ? { f: `IF(L${row}="","",L${row}-TODAY())`, v: sc.daysLeft } : '',
+          r.why.join('، ')
+        ]);
+      });
+      const lastP = list.length + 1;
+
+      // ---- مراحل المشاريع: سطر لكل مشروع وعمود لكل مرحلة
+      const plain = list.filter((r) => !r.compound);
+      const matRows = [[H('المشروع'), ...cps.map((c) => H(`${c.position}. ${c.name_ar}`)), H('الإنجاز')]];
+      plain.forEach((r, i) => {
+        const row = i + 2;
+        matRows.push([r.p.client, ...cps.map((c) => ST[stageOf(r.p, c.key).status]),
+          { f: `IFERROR(COUNTIF(B${row}:${X.colName(cps.length)}${row},"مكتملة")/(${cps.length}-COUNTIF(B${row}:${X.colName(cps.length)}${row},"لا تنطبق")),0)`, v: r.pct, s: 'pct' }]);
+      });
+      if (plain.length) {
+        const row = plain.length + 2;
+        matRows.push([{ v: 'المكتملة من كل مرحلة', s: 'header' }, ...cps.map((c, j) => ({ f: `COUNTIF(${X.colName(j + 1)}2:${X.colName(j + 1)}${row - 1},"مكتملة")`, v: plain.filter((r) => stageOf(r.p, c.key).status === 'done').length, s: 'calc' })), '']);
+      }
+
+      // ---- تفاصيل المراحل: سطر لكل مرحلة بدأت أو أُسندت
+      const detRows = [['المشروع', 'رقم', 'المرحلة', 'الحالة', 'تاريخ البدء', 'تاريخ الانتهاء', 'المدة (أيام)', 'المنفّذ', 'نوع المنفّذ', 'الكوادر', 'ملاحظات'].map(H)];
+      plain.forEach((r) => cps.forEach((c) => {
+        const x = stageOf(r.p, c.key);
+        if (x.status === 'not_started' && !x.crew_id && !x.notes) return;
+        const row = detRows.length + 1, crew = crewOf(x.crew_id);
+        detRows.push([r.p.client, c.position, c.name_ar, ST[x.status], d(x.start_date), d(x.end_date),
+          x.start_date && x.end_date ? { f: `IF(AND(E${row}<>"",F${row}<>""),F${row}-E${row}+1,"")`, v: dayDiff(x.end_date, x.start_date) + 1 } : '',
+          crew?.name || '', crew ? KIND_AR[crew.kind] : '', x.crew ?? '', x.notes ? { v: x.notes, s: 'wrap' } : '']);
+      }));
+
+      // ---- الفرق والمقاولون (على كل المشاريع، لأن الأداء لا يُقاس على جزء)
+      const crewRows = [['الاسم', 'النوع', 'الرئيس / المسؤول', 'الهاتف', 'المحافظات', 'فعّال', 'مراحل مكتملة', 'مراحل جارية', 'مشاريع', 'متوسط أيام المرحلة', 'اكتملت بعد موعد التسليم', 'يعمل الآن في'].map(H)];
+      const cpN = Object.fromEntries(cps.map((c) => [c.key, c.name_ar]));
+      state.crews.forEach((c) => {
+        const st = crewStats(c);
+        crewRows.push([c.name, KIND_AR[c.kind], c.leader || '', c.phone || '', (c.governorates || []).join('، '), c.active ? 'نعم' : 'لا',
+          st.done, st.ip, st.projects.size, st.avg === null ? '' : Math.round(st.avg * 10) / 10, st.afterDue,
+          st.at.map((w) => `${w.p.client} (${cpN[w.x.checkpoint]})`).join('، ')]);
+      });
+
+      const sheets = [
+        { name: 'الملخص', rows: sumRows, opts: { rtl: true, widths: [44, 90] } },
+        { name: 'المشاريع', rows: projRows, opts: { rtl: true, freezeRow: 1, freezeCol: 1, autoFilter: `A1:${X.colName(pHead.length - 1)}${lastP}`,
+          widths: [30, 14, 12, 14, 10, 24, 15, 30, 26, 12, 12, 12, 11, 24, 26, 10, 10, 10, 12, 16, 14, 40],
+          cf: [statusCF(`M2:M${lastP}`), { sqref: `T2:T${lastP}`, rules: [{ dxf: 1, formula: '"متأخر"' }, { dxf: 2, formula: '"متأخر عن الجدول"' }, { dxf: 0, formula: '"مكتمل"' }] }] } }
+      ];
+      if (plain.length) {
+        sheets.push({ name: 'مراحل المشاريع', rows: matRows, opts: { rtl: true, freezeRow: 1, freezeCol: 1, widths: [30, ...cps.map(() => 13), 10],
+          cf: [statusCF(`B2:${X.colName(cps.length)}${plain.length + 1}`)] } });
+        sheets.push({ name: 'تفاصيل المراحل', rows: detRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:K${detRows.length}`, widths: [30, 6, 22, 11, 12, 12, 11, 24, 14, 9, 40],
+          cf: [statusCF(`D2:D${detRows.length}`)] } });
+      }
+      sheets.push({ name: 'الفرق والمقاولون', rows: crewRows, opts: { rtl: true, freezeRow: 1, autoFilter: `A1:L${crewRows.length}`, widths: [26, 14, 20, 15, 24, 7, 12, 12, 9, 16, 20, 40] } });
+
+      download(X.writeWorkbook(sheets), `sorror-projects-${today}.xlsx`);
+      toast(`تم تنزيل ${list.length === all.length ? 'كل المشاريع' : `${list.length} من ${all.length} مشروع`}`);
+    } catch (e) { fail(e); }
+    finally { if (btn) btn.disabled = false; }
+  }
 
   // أرقام قسم المجمّعات: مجمّع واحد ← متابعة وحداته مصفّاة، وأكثر ← قائمة المجمّعات
   function compoundDrill(rows, st) {

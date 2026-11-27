@@ -164,7 +164,7 @@
   }
 
   // الأنماط: 0 عادي، 1 عنوان، 2 ناجح، 3 فاشل، 4 معلّق، 5 لا ينطبق، 6 نسبة، 7 عنوان كبير، 8 تنبيه
-  const STYLE = { normal: 0, header: 1, pass: 2, fail: 3, pending: 4, na: 5, pct: 6, title: 7, alert: 8, input: 9, calc: 10, calcPct: 11 };
+  const STYLE = { normal: 0, header: 1, pass: 2, fail: 3, pending: 4, na: 5, pct: 6, title: 7, alert: 8, input: 9, calc: 10, calcPct: 11, date: 12, wrap: 13 };
   const STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
 <fonts count="3"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font></fonts>
@@ -177,7 +177,7 @@
 <fill><patternFill patternType="solid"><fgColor rgb="FFFF0000"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFFF99"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF2F2F2"/></patternFill></fill></fills>
 <borders count="2"><border/><border><left style="thin"><color rgb="FFBFBFBF"/></left><right style="thin"><color rgb="FFBFBFBF"/></right><top style="thin"><color rgb="FFBFBFBF"/></top><bottom style="thin"><color rgb="FFBFBFBF"/></bottom></border></borders>
 <cellStyleXfs count="1"><xf/></cellStyleXfs>
-<cellXfs count="12">
+<cellXfs count="14">
 <xf borderId="1" applyBorder="1"/>
 <xf fontId="1" fillId="6" borderId="1" applyFont="1" applyFill="1" applyBorder="1"><alignment wrapText="1" vertical="center"/></xf>
 <xf fillId="2" borderId="1" applyFill="1" applyBorder="1"/>
@@ -190,6 +190,8 @@
 <xf fillId="8" borderId="1" applyFill="1" applyBorder="1"/>
 <xf fillId="9" borderId="1" applyFill="1" applyBorder="1"/>
 <xf numFmtId="9" fillId="9" borderId="1" applyNumberFormat="1" applyFill="1" applyBorder="1"/>
+<xf numFmtId="14" borderId="1" applyNumberFormat="1" applyBorder="1"/>
+<xf borderId="1" applyBorder="1" applyAlignment="1"><alignment wrapText="1" vertical="top"/></xf>
 </cellXfs>
 <dxfs count="6">
 <dxf><font><color rgb="FF006100"/></font><fill><patternFill><bgColor rgb="FFC6EFCE"/></patternFill></fill></dxf>
@@ -205,9 +207,11 @@
     const cols = opts.widths
       ? '<cols>' + opts.widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('') + '</cols>'
       : '';
+    // rtl: الورقة من اليمين لليسار (للأوراق العربية)
+    const rtl = opts.rtl ? ' rightToLeft="1"' : '';
     const freeze = opts.freezeRow
-      ? `<sheetViews><sheetView workbookViewId="0"><pane ySplit="${opts.freezeRow}" xSplit="${opts.freezeCol || 0}" topLeftCell="${colName(opts.freezeCol || 0)}${opts.freezeRow + 1}" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>`
-      : '';
+      ? `<sheetViews><sheetView${rtl} workbookViewId="0"><pane ySplit="${opts.freezeRow}" xSplit="${opts.freezeCol || 0}" topLeftCell="${colName(opts.freezeCol || 0)}${opts.freezeRow + 1}" activePane="bottomRight" state="frozen"/></sheetView></sheetViews>`
+      : opts.rtl ? `<sheetViews><sheetView${rtl} workbookViewId="0"/></sheetViews>` : '';
     const body = rows.map((row, r) => {
       if (!row) return '';
       const cells = row.map((cell, c) => {
