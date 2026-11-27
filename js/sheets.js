@@ -77,6 +77,9 @@
       grp('internal', 'فرق الشركة'), grp('contractor', 'المقاولون'));
   }
 
+  // فرقة الوحدة: مربوطة بقائمة الفرق والمقاولين (crew_id)
+  const crewName = (u) => A.crewOf(u.crew_id)?.name || '';
+
   // بطاقة العميل والمواعيد
   function clientCard(p, sp) {
     const sc = A.schedule(p, sp.pct, sp.status);
@@ -408,7 +411,7 @@
             h('div', { class: 'mixbar', role: 'img', 'aria-label': mix.map(([, v, l]) => `${l} ${v}`).join('، ') },
               mix.filter(([, v]) => v > 0).map(([c, v]) => { const s2 = h('span', { class: c }); s2.style.flexGrow = String(v); return s2; })),
             h('ul', { class: 'mix-key' }, mix.map(([c, v, l]) => h('li', null, h('i', { class: c }), `${l}: ${num(v)}`)))))),
-      h('div', { class: 'd2-groups' }, groupBlock(rows, 'zone', 'حسب البلوك / المنطقة'), groupBlock(rows, 'crew', 'حسب الفرقة')),
+      h('div', { class: 'd2-groups' }, groupBlock(rows, 'zone', 'حسب البلوك / المنطقة'), groupBlock(rows, 'crew', 'حسب الفرقة', crewName)),
       h('section', { class: 'd2-today' }, h('h2', null, 'نشاط اليوم'), A.todayActivity([p.id])),
       h('section', { class: 'd2-route', 'aria-labelledby': 'route-h' },
         h('h2', { id: 'route-h' }, 'مسار الفحص'),
@@ -421,13 +424,13 @@
   }
 
   // تقدّم الوحدات مجمّعة حسب المنطقة أو الفرقة
-  function groupBlock(rows, key, title) {
+  function groupBlock(rows, key, title, get = (u) => u[key]) {
     const m = new Map();
-    rows.forEach(({ u, k }) => { const g = u[key] || ''; if (!m.has(g)) m.set(g, []); m.get(g).push(k); });
+    rows.forEach(({ u, k }) => { const g = get(u) || ''; if (!m.has(g)) m.set(g, []); m.get(g).push(k); });
     const named = [...m.entries()].filter(([g]) => g);
     if (!named.length) {
       return h('section', { class: 'd2-group' }, h('h2', null, title),
-        h('p', { class: 'calm muted' }, key === 'zone' ? `لم تُحدَّد المناطق بعد. اكتب البلوك أو المنطقة لكل ${W.one} من صفحتها أو من ملف Excel.` : `لم تُحدَّد الفرق بعد. اكتب الفرقة لكل ${W.one} من صفحتها أو من ملف Excel.`));
+        h('p', { class: 'calm muted' }, key === 'zone' ? `لم تُحدَّد المناطق بعد. اكتب البلوك أو المنطقة لكل ${W.one} من صفحتها أو من ملف Excel.` : `لم تُحدَّد الفرق بعد. اختر الفرقة لكل ${W.one} من صفحتها أو من ملف Excel.`));
     }
     const list = [...m.entries()].map(([g, ks]) => ({ g: g || 'غير محددة', n: ks.length, done: ks.filter((k) => k.U === 'Complete').length,
       fail: ks.filter((k) => k.R).length, alert: ks.filter((k) => k.W).length, pct: ks.reduce((a, k) => a + k.S, 0) / ks.length }))
@@ -448,13 +451,14 @@
     // الأولوية: مشكلة ← جارية ← لم تبدأ ← مكتملة
     const rank = (k) => (k.R || k.W || k.T ? 0 : k.U === 'In progress' ? 1 : k.U === 'Not started' ? 2 : 3);
     const zones = [...new Set(d.units.map((u) => u.zone).filter(Boolean))].sort();
-    const crews = [...new Set(d.units.map((u) => u.crew).filter(Boolean))].sort();
+    const crews = [...new Set(d.units.map((u) => u.crew_id).filter(Boolean))].map((id) => [id, A.crewOf(id)?.name || '—'])
+      .sort((a, b) => a[1].localeCompare(b[1], 'ar'));
     const box = h('div');
     const count = h('span', { class: 'muted small' });
     const isMobile = mobile();
 
     const visible = (u, k) => (!f.q || u.code.toLowerCase().includes(f.q.toLowerCase()))
-      && (!f.zone || u.zone === f.zone) && (!f.crew || u.crew === f.crew)
+      && (!f.zone || u.zone === f.zone) && (!f.crew || u.crew_id === f.crew)
       && (!f.status || (f.status === 'alert' ? k.W : k.U === f.status))
       && (!f.next || (f.next === '-' ? k.V === '-' : k.V !== '-' && k.V.key === f.next));
 
@@ -470,7 +474,7 @@
     const filters = [
       h('input', { type: 'search', placeholder: `بحث برقم ${W.the}`, value: f.q, 'aria-label': 'بحث', onInput: (e) => { f.q = e.target.value; draw(); } }),
       zones.length ? sel('zone', 'كل المناطق', zones.map((z) => [z, z])) : null,
-      crews.length ? sel('crew', 'كل الفرق', crews.map((z) => [z, z])) : null,
+      crews.length ? sel('crew', 'كل الفرق', crews) : null,
       sel('status', 'كل الحالات', [['Has failure', 'فيها فشل'], ['alert', 'تنبيه تسلسل'], ['In progress', 'جارية'], ['Not started', 'لم تبدأ'], ['Complete', 'مكتملة']]),
       sel('next', 'كل الخطوات التالية', cps.map((c) => [c.key, c.name_ar]).concat([['-', 'لا شيء (مكتملة)']]))
     ];
@@ -504,7 +508,7 @@
       h('tbody', null, list.map(({ u, k }) => {
         const tr = h('tr', { class: k.W ? 'alert-row' : '' },
           h('td', { class: 'stk' }, h('a', { href: villaHref(p, u), class: 'vlink' }, u.code)),
-          h('td', null, u.zone || ''), h('td', null, u.crew || ''),
+          h('td', null, u.zone || ''), h('td', null, crewName(u)),
           cps.map((c) => {
             const r = u.results?.[c.key] || 'pending';
             const label = `${u.code} · ${c.name_ar}: ${A.RES_AR[r]}`;
@@ -585,18 +589,18 @@
 
     const info = staff ? (() => {
       const f = { code: h('input', { value: u.code, maxlength: 40, dir: 'ltr' }), zone: h('input', { value: u.zone || '', maxlength: 60 }),
-        crew: h('input', { value: u.crew || '', maxlength: 60 }), remarks: h('textarea', { rows: 2, maxlength: 2000, value: u.remarks || '' }) };
+        crew: crewSelect(u.crew_id || ''), remarks: h('textarea', { rows: 2, maxlength: 2000, value: u.remarks || '' }) };
       const save = async () => {
         if (!f.code.value.trim()) return toast(`رقم ${W.the} مطلوب`, 'error');
-        const patch = { code: f.code.value.trim(), zone: f.zone.value.trim() || null, crew: f.crew.value.trim() || null, remarks: f.remarks.value.trim() || null };
+        const patch = { code: f.code.value.trim(), zone: f.zone.value.trim() || null, crew_id: f.crew.value || null, remarks: f.remarks.value.trim() || null };
         const res = await S.sb.from('units').update(patch).eq('id', u.id).select().maybeSingle();
         if (res.error || !res.data) return A.fail(res.error || 'permission denied');
-        Object.assign(u, patch); toast('تم الحفظ'); A.render();
+        Object.assign(u, patch); A.loadCrewUnits(); toast('تم الحفظ'); A.render();
       };
-      return h('details', { class: 'panel' }, h('summary', null, `بيانات ${W.the}: `, [u.zone, u.crew].filter(Boolean).join(' · ') || 'بدون منطقة وفرقة'),
-        h('div', { class: 'form-grid' }, A.field(`رقم ${W.the}`, f.code), A.field('المنطقة', f.zone), A.field('الفرقة', f.crew), A.field('ملاحظات', f.remarks, { wide: true })),
+      return h('details', { class: 'panel' }, h('summary', null, `بيانات ${W.the}: `, [u.zone, crewName(u)].filter(Boolean).join(' · ') || 'بدون منطقة وفرقة'),
+        h('div', { class: 'form-grid' }, A.field(`رقم ${W.the}`, f.code), A.field('المنطقة', f.zone), A.field('الفرقة أو المقاول', f.crew), A.field('ملاحظات', f.remarks, { wide: true })),
         h('div', { class: 'row end' }, h('button', { type: 'button', class: 'btn primary', onClick: save }, 'حفظ')));
-    })() : (u.zone || u.crew || u.remarks ? h('p', { class: 'muted' }, [u.zone, u.crew, u.remarks].filter(Boolean).join(' · ')) : null);
+    })() : (u.zone || u.crew_id || u.remarks ? h('p', { class: 'muted' }, [u.zone, crewName(u), u.remarks].filter(Boolean).join(' · ')) : null);
 
     const reading = (label, val, chk) => h('div', { class: 'rd' }, h('span', { class: 'muted small' }, label), h('b', null, blank(val) ? '—' : String(val)),
       chk ? h('span', { class: 'chip ' + (chk === 'OK' ? 'st-complete' : 'st-has-failure') }, CHECK_AR[chk]) : null);
@@ -704,20 +708,20 @@
     const prefix = h('input', { dir: 'ltr', value: 'V-' });
     const from = h('input', { type: 'number', min: 1, dir: 'ltr', value: last + 1 });
     const to = h('input', { type: 'number', min: 1, dir: 'ltr', value: last + 1 });
-    const zone = h('input', { maxlength: 60 }), crew = h('input', { maxlength: 60 });
-    A.modal(`إضافة ${W.many}`, h('div', { class: 'form-grid' }, A.field('البادئة', prefix), A.field('من رقم', from), A.field('إلى رقم', to), A.field('المنطقة', zone), A.field('الفرقة', crew)),
+    const zone = h('input', { maxlength: 60 }), crew = crewSelect('');
+    A.modal(`إضافة ${W.many}`, h('div', { class: 'form-grid' }, A.field('البادئة', prefix), A.field('من رقم', from), A.field('إلى رقم', to), A.field('المنطقة', zone), A.field('الفرقة أو المقاول', crew)),
       [{ label: 'إضافة', cls: 'primary', run: async () => {
         const a = Number(from.value), b = Number(to.value);
         if (!(a >= 1 && b >= a && b - a < 2000)) { toast('تحقق من الأرقام', 'error'); return false; }
         const digits = Math.max(3, String(b).length);
         const pos = Math.max(0, ...d.units.map((u) => u.position || 0));
         const rows = [];
-        for (let i = a; i <= b; i++) rows.push({ project_id: p.id, code: prefix.value.trim() + String(i).padStart(digits, '0'), position: pos + i - a + 1, zone: zone.value.trim() || null, crew: crew.value.trim() || null });
+        for (let i = a; i <= b; i++) rows.push({ project_id: p.id, code: prefix.value.trim() + String(i).padStart(digits, '0'), position: pos + i - a + 1, zone: zone.value.trim() || null, crew_id: crew.value || null });
         for (let i = 0; i < rows.length; i += 500) {
           const r = await S.sb.from('units').upsert(rows.slice(i, i + 500), { onConflict: 'project_id,code', ignoreDuplicates: true });
           if (r.error) { A.fail(r.error); return false; }
         }
-        await A.loadProject(p.id, true);
+        await A.loadProject(p.id, true); A.loadCrewUnits();
         toast('تمت الإضافة'); A.render();
       } }]);
   }
@@ -1006,7 +1010,7 @@
       vt[3] = H(['Villa', 'Zone', 'Crew', ...cps.map((c) => c.name_en), 'Passed', 'Failed', '% complete', 'Open NCRs', 'Status', 'Next step', 'Sequence alert', 'Remarks']);
       d.units.forEach((u, i) => {
         const r = 5 + i, k = F.row(u, cps, A.openNcrsOf(d, u.id));
-        vt.push([u.code, u.zone || '', u.crew || '', ...cps.map((c) => A.RES[u.results?.[c.key] || 'pending']),
+        vt.push([u.code, u.zone || '', crewName(u), ...cps.map((c) => A.RES[u.results?.[c.key] || 'pending']),
           { f: `COUNTIF(D${r}:P${r},"Pass")`, v: k.Q, s: 'calc' },
           { f: `COUNTIF(D${r}:P${r},"Fail")`, v: k.R, s: 'calc' },
           { f: `IFERROR(Q${r}/(13-COUNTIF(D${r}:P${r},"N/A")),0)`, v: k.S, s: 'calcPct' },
@@ -1176,17 +1180,29 @@
       }
     }
 
+    // الفرق: اسم Crew يُطابَق مع قائمة الفرق والمقاولين (أ/ا، ة/ه…)، والاسم غير الموجود تُنشأ له فرقة من الشركة
+    const known = new Map(S.crews.map((c) => [A.nameKey(c.name), c.id]));
+    const newCrews = [...new Map(units.filter((u) => u.crew && !known.has(A.nameKey(u.crew)))
+      .map((u) => [A.nameKey(u.crew), u.crew.replace(/\s+/g, ' ')])).values()];
+
     const d = await A.loadProject(p.id, true);
     const existing = new Map(d.units.map((u) => [u.code, u]));
     const changes = units.reduce((s, u) => s + Object.entries(u.results).filter(([k, v]) => v !== (existing.get(u.code)?.results?.[k] || 'pending')).length, 0);
     if (!await confirmBox({ title: 'تأكيد الاستيراد', okText: 'استيراد',
-      body: `في الملف ${units.length} ${W.one} (${units.filter((u) => !existing.has(u.code)).length} جديدة)، و${changes} نتيجة ستتغير، و${tests.length} سطر قراءات، و${ncrs.length} NCR. هل تتابع؟` })) return say('أُلغي الاستيراد');
+      body: `في الملف ${units.length} ${W.one} (${units.filter((u) => !existing.has(u.code)).length} جديدة)، و${changes} نتيجة ستتغير، و${tests.length} سطر قراءات، و${ncrs.length} NCR${newCrews.length ? `، وستُضاف ${newCrews.length} فرقة جديدة لقائمة الفرق (${newCrews.join('، ')})` : ''}. هل تتابع؟` })) return say('أُلغي الاستيراد');
     A.modal('جارٍ الاستيراد…', out, []);
 
     const errors = [];
     try {
+      if (newCrews.length) {
+        say('الفرق…');
+        const c = await S.sb.from('crews').insert(newCrews.map((name) => ({ name, kind: 'internal' }))).select();
+        if (c.error) throw c.error;
+        c.data.forEach((x) => { S.crews.push(x); known.set(A.nameKey(x.name), x.id); });
+        S.crews.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+      }
       say(`${W.theMany}…`);
-      const rows = units.map((u) => ({ project_id: p.id, code: u.code, zone: u.zone, crew: u.crew, remarks: u.remarks, position: u.position }));
+      const rows = units.map((u) => ({ project_id: p.id, code: u.code, zone: u.zone, crew_id: u.crew ? known.get(A.nameKey(u.crew)) || null : null, remarks: u.remarks, position: u.position }));
       const fresh = rows.filter((r) => !existing.has(r.code));
       for (let i = 0; i < fresh.length; i += 500) {
         const r = await S.sb.from('units').insert(fresh.slice(i, i + 500));
@@ -1194,8 +1210,8 @@
       }
       for (const r of rows) {
         const e = existing.get(r.code);
-        if (e && (e.zone !== r.zone || e.crew !== r.crew || e.remarks !== r.remarks || e.position !== r.position)) {
-          const x = await S.sb.from('units').update({ zone: r.zone, crew: r.crew, remarks: r.remarks, position: r.position }).eq('id', e.id);
+        if (e && (e.zone !== r.zone || (e.crew_id || null) !== r.crew_id || e.remarks !== r.remarks || e.position !== r.position)) {
+          const x = await S.sb.from('units').update({ zone: r.zone, crew_id: r.crew_id, remarks: r.remarks, position: r.position }).eq('id', e.id);
           if (x.error) errors.push(r.code + ': ' + A.errText(x.error));
         }
       }
@@ -1233,7 +1249,7 @@
         const r = await S.sb.from('ncrs').insert({ ...row, ncr_no: row.ncr_no || 'NCR-' + String(nDone + 1).padStart(3, '0'), project_id: p.id, unit_id: u.id });
         if (r.error) errors.push((x.ncr_no || x.code) + ': ' + A.errText(r.error)); else nDone++;
       }
-      await A.loadProject(p.id, true);
+      await A.loadProject(p.id, true); A.loadCrewUnits();
       clear(out).append(h('p', { class: 'ok-text' }, `✓ تم: ${units.length} ${W.one}، ${done} نتيجة، ${tDone} سطر قراءات، ${nDone} NCR.`),
         errors.length ? h('div', { class: 'err' }, h('b', null, `${errors.length} خطأ:`), h('ul', null, errors.slice(0, 30).map((e) => h('li', null, e)))) : null);
       A.modal('اكتمل الاستيراد', out, [{ label: 'عرض Villa Tracker', cls: 'primary', run: () => { A.go(`project/${p.id}/tracker`); A.render(); } }]);
