@@ -1410,3 +1410,56 @@ a.pill-btn:active { transform: scale(.96); }
 @media (max-width: 760px) { .avg-card { padding: 12px 14px; } .avg-card .st-ring.lg { width: 60px; height: 60px; } .avg-card .st-face b { font-size: .8rem; } }
 .load-err { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .le-ic { font-size: 2.4rem; }
+
+/* ==========================================================
+   توحيد باقي الشاشات بنفس أسلوب الرئيسية: بطاقات مدوّرة، تبويبات كأقراص، أزرار أنعم
+   ========================================================== */
+.btn { border-radius: 12px; }
+.book { max-width: 1200px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.book-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 0; }
+.book-head h1 { margin: 4px 0 0; font-size: clamp(1.3rem, 3vw, 1.7rem); }
+.book-head .back { display: inline-flex; align-items: center; min-height: 36px; padding: 0 14px; border-radius: var(--r-pill); background: var(--surface-2); color: var(--text); text-decoration: none; font-size: .85rem; }
+.sheet-tabs { display: flex; gap: 4px; padding: 4px; border-radius: var(--r-pill); background: var(--surface-2); overflow-x: auto; scrollbar-width: none; border: 0; margin: 0; }
+.sheet-tabs::-webkit-scrollbar { display: none; }
+.sheet-tab { flex: none; border: 0 !important; border-radius: var(--r-pill); padding: 9px 18px; white-space: nowrap; color: var(--muted); text-decoration: none; box-shadow: none !important; }
+.sheet-tab.on { background: var(--surface); color: var(--text); font-weight: 700; box-shadow: 0 1px 4px rgb(0 0 0 / 8%) !important; }
+.book > .sheet { background: transparent; border: 0; padding: 0; border-radius: 0; }
+.panel, .card { border-radius: var(--r-card); border: 1px solid var(--line); background: var(--surface); }
+.dash2:not(.home) { gap: 14px; display: flex; flex-direction: column; background: transparent; }
+.dash2:not(.home) .d2-grid { gap: 14px; }
+.dash2:not(.home) .d2-grid > section, .dash2:not(.home) .d2-side > section, .dash2:not(.home) > section {
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 16px; margin: 0; }
+.dash2:not(.home) .d2-side { gap: 14px; }
+.cdash-head .cd-lead { margin: 0; font-family: var(--f-head); font-size: 1.02rem; line-height: 1.75; }
+.comp-card, .crew-card { border-radius: var(--r-card); }
+.xl-wrap { border-radius: 14px; }
+.filters input, .filters select { border-radius: var(--r-pill); }
+.table-wrap { border-radius: 14px; }
+.villa .vhead { border-radius: var(--r-card); }
+.bottom-nav { border-radius: 0; }
+@media (max-width: 760px) {
+  .book-head h1 { font-size: 1.2rem; }
+  .sheet-tab { padding: 8px 14px; font-size: .88rem; }
+  .dash2:not(.home) .d2-grid > section, .dash2:not(.home) .d2-side > section, .dash2:not(.home) > section { padding: 14px; border-radius: 18px; }
+}
+.crew-card .cc-top { justify-content: flex-start; }
+.crew-card .cc-top .chip { margin-inline-start: auto; }
+.cc-av { width: 46px; height: 46px; font-size: .78rem; flex: none; }
+.cc-av.busy { border-color: var(--sky); }
+.cc-name { display: flex; flex-direction: column; min-width: 0; }
+.crew-card a[href^="tel:"] { display: inline-flex; align-items: center; min-height: 40px; }
+/* المستخدمون: صورة بالأحرف الأولى، وبطاقات على الهاتف */
+.u-name { display: flex; align-items: center; gap: 10px; }
+.u-av { width: 40px; height: 40px; flex: none; font-size: .72rem; }
+.u-row.off { opacity: .6; }
+@media (max-width: 760px) {
+  .table:has(.u-row) thead { display: none; }
+  .table:has(.u-row), .table:has(.u-row) tbody { display: block; }
+  .u-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+  .u-row td { display: flex; flex-direction: column; gap: 4px; padding: 0; border: 0; }
+  .u-row td.u-name { grid-column: 1 / -1; flex-direction: row; }
+  .u-row td::before { content: attr(data-l); font-size: .75rem; color: var(--muted); }
+  .u-row td.u-name::before { content: none; }
+  .u-row select, .u-row input:not([type=checkbox]) { width: 100%; min-height: 44px; }
+  .u-row input[type=checkbox] { width: 24px; height: 24px; }
+}

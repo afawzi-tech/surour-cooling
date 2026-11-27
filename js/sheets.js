@@ -459,20 +459,20 @@
 
     const mix = [['done', D.B4, 'مكتملة'], ['run', D.B5, 'جارية'], ['idle', D.B6, 'لم تبدأ']];
     return h('div', { class: 'dash2' },
-      h('header', { class: 'd2-head' },
-        h('p', { class: 'd2-lead' }, lead),
-        h('div', { class: 'd2-pct', 'aria-label': `نسبة إنجاز الفحص الكلية ${A.pctText(D.B10)}` },
-          h('strong', null, A.pctText(D.B10)), h('span', null, 'من فحوصات المجمّع منجزة'))),
-      // كل رقم يفتح متابعة الوحدات مصفّاة عليه (وNCR تفتح سجل عدم المطابقة على المفتوحة)
-      h('dl', { class: 'd2-stats' }, [
-        ['مكتملة', D.B4, 'ok', 'Complete'], ['جارية', D.B5, '', 'In progress'], ['لم تبدأ', D.B6, 'muted', 'Not started'],
-        ['فيها بند فاشل', D.B7, D.B7 ? 'bad' : 'muted', 'Has failure'], ['تنبيهات تسلسل', D.B8, D.B8 ? 'warn' : 'muted', 'alert'], ['NCR مفتوحة', D.B9, D.B9 ? 'bad' : 'muted', 'ncr']
-      ].map(([l, v, c, st]) => h('div', { class: 'st ' + c },
-        h('button', { type: 'button', class: 'st-btn', title: st === 'ncr' ? 'عرض NCR المفتوحة' : `عرض ${W.theMany}: ${l}`, onClick: () => {
-          if (st === 'ncr') { S._nf = { status: 'open' }; A.go(`project/${p.id}/ncr`); return; }
-          (S._tfBy ||= {})[p.id] = { q: '', zone: '', crew: '', status: st, next: '', sort: 'code' };
-          A.go(`project/${p.id}/tracker`);
-        } }, h('dd', null, num(v)), h('dt', null, l, h('span', { class: 'st-go', 'aria-hidden': 'true' }, ' ←')))))),
+      // رأس المجمّع بأسلوب التطبيقات: حلقة الإنجاز والجملة، ثم شرائح الأرقام (كل شريحة تفتح المتابعة مصفّاة)
+      h('header', { class: 'phead cdash-head' + (D.B7 || D.B9 ? ' bad' : D.B8 ? ' warn' : '') },
+        h('div', { class: 'phead-top' },
+          h('span', { class: 'st-ring lg', style: A.ringStyle(D.B10), 'aria-label': `نسبة إنجاز الفحص ${A.pctText(D.B10)}` },
+            h('span', { class: 'st-face' }, h('b', null, A.pctText(D.B10)), h('small', null, 'من الفحوصات'))),
+          h('p', { class: 'cd-lead' }, lead))),
+      h('div', { class: 'stat-chips' }, [
+        ['مكتملة', D.B4, 'ok', 'Complete'], ['جارية', D.B5, 'run', 'In progress'], ['لم تبدأ', D.B6, 'idle', 'Not started'],
+        ['فيها فحص فاشل', D.B7, D.B7 ? 'bad' : 'zero', 'Has failure'], ['تنبيهات تسلسل', D.B8, D.B8 ? 'warn' : 'zero', 'alert'], ['عدم مطابقة مفتوحة', D.B9, D.B9 ? 'bad' : 'zero', 'ncr']
+      ].map(([l, v, c, st]) => h('button', { type: 'button', class: 'stat-chip ' + c, title: st === 'ncr' ? 'عرض حالات عدم المطابقة المفتوحة' : `عرض ${W.theMany}: ${l}`, onClick: () => {
+        if (st === 'ncr') { S._nf = { status: 'open' }; A.go(`project/${p.id}/ncr`); return; }
+        (S._tfBy ||= {})[p.id] = { q: '', zone: '', crew: '', status: st, next: '', sort: 'code' };
+        A.go(`project/${p.id}/tracker`);
+      } }, h('b', null, num(v)), h('span', null, l)))),
       h('div', { class: 'd2-grid' },
         h('section', { class: 'd2-plan', 'aria-labelledby': 'plan-h' },
           h('div', { class: 'd2-plan-head' },
@@ -491,7 +491,7 @@
             attn.length
               ? h('ul', null, attn.slice(0, 30).map(({ u, k }) => h('li', null, h('a', { href: villaHref(p, u) },
                   h('b', null, u.code), h('span', { class: 'why' + (problem(k) ? '' : ' alert') }, why(k)), h('span', { class: 'nx' }, k.V === '-' ? '' : 'التالي: ' + k.V.name_ar)))))
-              : h('p', { class: 'calm' }, 'لا فشل ولا تنبيهات ولا NCR مفتوحة.')),
+              : h('p', { class: 'calm' }, '👌 كل شيء على ما يرام: لا فحص فاشل ولا تنبيهات ولا عدم مطابقة مفتوحة.')),
           h('section', { class: 'd2-mix' },
             h('h2', null, `حالة ${W.theMany}`),
             h('div', { class: 'mixbar', role: 'img', 'aria-label': mix.map(([, v, l]) => `${l} ${v}`).join('، ') },
@@ -729,7 +729,7 @@
           const rest = cps.filter((cp) => !done.includes(cp));
           return [
             done.length ? h('details', { class: 'done-group' },
-              h('summary', null, `✓ ${done.length} مرحلة ناجحة أو لا تنطبق`, h('span', { class: 'muted small' }, ' (عرض وتعديل)')),
+              h('summary', null, `✓ ${A.cntAr(done.length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} ناجحة أو لا تنطبق`, h('span', { class: 'muted small' }, ' (عرض وتعديل)')),
               h('ol', { class: 'cp-list' }, done.map(row))) : null,
             h('ol', { class: 'cp-list' }, rest.map(row))
           ];
