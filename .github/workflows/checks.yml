@@ -1,0 +1,60 @@
+# فحوصات تلقائية مع كل رفع إلى GitHub. علامة ✓ خضراء = كل شيء سليم، و✗ حمراء = لا تنشر قبل الإصلاح.
+name: الفحوصات
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  code:
+    name: الكود والمعادلات
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: فحص الكود (ESLint)
+        run: npx -y eslint@10.15.0 .
+      - name: اختبارات المعادلات
+        run: node --test "tests/js/*.test.js"
+      - name: فحوصات المستودع (المفاتيح، أرقام النسخ، CSP)
+        run: node tests/static-checks.mjs
+
+  database:
+    name: قاعدة البيانات
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: الصلاحيات وقواعد العمل
+        run: tests/db/run.sh
+      - name: التحديث من النسخة السابقة يطابق التثبيت من الصفر
+        env:
+          OLD: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git cat-file -e "$OLD:supabase/schema.sql" 2>/dev/null; then
+            git show "$OLD:supabase/schema.sql" > "$RUNNER_TEMP/old.sql"
+          else
+            git show HEAD~1:supabase/schema.sql > "$RUNNER_TEMP/old.sql"
+          fi
+          tests/db/upgrade.sh "$RUNNER_TEMP/old.sql"
+
+  ui:
+    name: الواجهة في المتصفح
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: تثبيت المتصفح
+        run: |
+          npm install --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+      - name: فتح كل الصفحات ببيانات وهمية
+        run: node tests/ui/smoke.mjs
