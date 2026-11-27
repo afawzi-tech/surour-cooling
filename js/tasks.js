@@ -8,7 +8,7 @@
 (() => {
   'use strict';
 
-  const { h, clear, toast, num, dateTime } = window.UI;
+  const { h, toast, num, dateTime } = window.UI;
   const A = window.App;
   const S = A.state;
   const R = () => window.Reports;

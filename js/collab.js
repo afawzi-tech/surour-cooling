@@ -8,7 +8,7 @@
 (() => {
   'use strict';
 
-  const { h, clear, toast, num, dateTime } = window.UI;
+  const { h, toast, num, dateTime } = window.UI;
   const A = window.App;
   const S = A.state;
   const cfg = window.SUROUR_CONFIG || {};
@@ -277,7 +277,7 @@
   }
 
   function filesPanel(p) {
-    const box = h('div', { class: 'fl-panel' }, h('p', { class: 'muted small' }, 'جارٍ التحميل…'));
+    const box = h('div', { class: 'pf-panel' }, h('p', { class: 'muted small' }, 'جارٍ التحميل…'));
     const staff = A.isStaff();
     const draw = async () => {
       const r = await S.sb.from('project_files').select('*').eq('project_id', p.id).order('created_at', { ascending: false });
@@ -286,13 +286,13 @@
       box.replaceChildren(...[
         h('div', { class: 'tk-bar' }, h('p', { class: 'muted small' }, list.length ? `${num(list.length)} ملف` : 'لا ملفات بعد.'),
           staff ? h('button', { type: 'button', class: 'btn primary', onClick: () => uploadDialog(p, draw) }, '+ رفع ملفات') : null),
-        list.length ? h('ul', { class: 'fl-list' }, list.map((f) => h('li', null,
-          h('button', { type: 'button', class: 'fl-open', onClick: () => openFile(f, false), title: 'فتح' },
-            h('span', { class: 'fl-ico', 'aria-hidden': 'true' }, FICON[f.kind]),
-            h('span', { class: 'fl-main' }, h('b', { dir: 'auto' }, f.name),
+        list.length ? h('ul', { class: 'pf-list' }, list.map((f) => h('li', null,
+          h('button', { type: 'button', class: 'pf-open', onClick: () => openFile(f, false), title: 'فتح' },
+            h('span', { class: 'pf-ico', 'aria-hidden': 'true' }, FICON[f.kind]),
+            h('span', { class: 'pf-main' }, h('b', { dir: 'auto' }, f.name),
               h('small', null, [FKIND_AR[f.kind], f.size ? size(f.size) : '', nameOf(f.uploaded_by), dateTime(f.created_at).slice(0, 10)].filter(Boolean).join(' · ')))),
-          f.staff_only ? h('span', { class: 'chip fl-staff' }, 'للإدارة فقط') : null,
-          h('div', { class: 'fl-act' },
+          f.staff_only ? h('span', { class: 'chip pf-staff' }, 'للإدارة فقط') : null,
+          h('div', { class: 'pf-act' },
             h('button', { type: 'button', class: 'btn ghost sm', onClick: () => openFile(f, true) }, 'تنزيل'),
             staff ? h('button', { type: 'button', class: 'btn ghost sm', onClick: () => editFile(f, draw) }, 'تعديل') : null))))
           : null,

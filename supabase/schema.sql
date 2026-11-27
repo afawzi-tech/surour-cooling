@@ -20,6 +20,10 @@
 
 create extension if not exists pgcrypto;
 
+-- "اليوم" بتوقيت بغداد، لا UTC (الخادم بتوقيت UTC، فبين 00:00 و03:00 كان اليوم يُحسب أمس)
+create or replace function public.today_iq()
+returns date language sql stable set search_path = '' as $$ select (now() at time zone 'Asia/Baghdad')::date $$;
+
 -- ---------- المستخدمون والأدوار ----------
 create table if not exists public.profiles (
   id          uuid primary key references auth.users (id) on delete cascade,
@@ -32,8 +36,9 @@ create table if not exists public.profiles (
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, full_name)
-  values (new.id, coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1)))
+  -- الحساب الجديد غير مفعّل حتى يفعّله المدير (احتياطاً لو فُتح التسجيل الذاتي بالخطأ)
+  insert into public.profiles (id, full_name, active)
+  values (new.id, coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1)), false)
   on conflict (id) do nothing;
   return new;
 end $$;
@@ -47,12 +52,12 @@ returns text language sql stable security definer set search_path = public as $$
   select role from public.profiles where id = auth.uid() and active
 $$;
 create or replace function public.is_staff()
-returns boolean language sql stable as $$ select public.app_role() in ('admin', 'supervisor') $$;
+returns boolean language sql stable set search_path = public as $$ select public.app_role() in ('admin', 'supervisor') $$;
 create or replace function public.is_admin()
-returns boolean language sql stable as $$ select public.app_role() = 'admin' $$;
+returns boolean language sql stable set search_path = public as $$ select public.app_role() = 'admin' $$;
 
 create or replace function public.protect_self_admin()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   if old.id = auth.uid() and (new.role <> 'admin' or not new.active) then
     raise exception 'لا يمكنك إزالة صلاحية المدير أو تعطيل حسابك بنفسك';
@@ -95,13 +100,14 @@ drop function if exists public.ncr_before_write() cascade;
 create table if not exists public.projects (
   id             uuid primary key default gen_random_uuid(),
   client         text not null check (char_length(btrim(client)) between 1 and 200),   -- اسم المشروع
-  contract_date  date not null default current_date,
+  contract_date  date not null default public.today_iq(),
   notes          text check (char_length(notes) <= 4000),
   created_by     uuid references public.profiles (id) on delete set null default auth.uid(),
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
-alter table public.projects alter column contract_date set default current_date;
+alter table public.projects alter column contract_date set default public.today_iq();
+alter table if exists public.ncrs alter column date_raised set default public.today_iq();
 alter table public.projects drop column if exists weights;
 alter table public.projects drop column if exists require_readings;
 -- الخلايا الصفراء في Test Records (الصف 2)
@@ -122,7 +128,7 @@ alter table public.projects add column if not exists project_type text not null 
 alter table public.projects add column if not exists unit_label text not null default 'وحدة' check (char_length(btrim(unit_label)) between 1 and 20);
 
 create or replace function public.touch_updated_at()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   new.updated_at := now(); new.created_by := old.created_by; new.created_at := old.created_at;
   return new;
@@ -194,7 +200,7 @@ create trigger units_create_checks after insert on public.units
 
 -- مثل الملف: لا منع، فقط تسجيل من غيّر ومتى (التنبيه يظهر في عمود Sequence alert)
 create or replace function public.unit_check_before_update()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   new.unit_id := old.unit_id; new.checkpoint := old.checkpoint;
   if new.result is distinct from old.result or new.notes is distinct from old.notes then
@@ -228,7 +234,7 @@ create table if not exists public.test_records (
 );
 
 create or replace function public.test_record_stamp()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   if tg_op = 'UPDATE' then new.unit_id := old.unit_id; end if;
   new.updated_by := auth.uid(); new.updated_at := now();
@@ -243,7 +249,7 @@ create table if not exists public.ncrs (
   id           uuid primary key default gen_random_uuid(),
   project_id   uuid not null references public.projects (id) on delete cascade,
   ncr_no       text not null check (char_length(btrim(ncr_no)) between 1 and 40),   -- A
-  date_raised  date not null default current_date,                                  -- B
+  date_raised  date not null default public.today_iq(),                                  -- B
   unit_id      uuid not null references public.units (id) on delete cascade,        -- C
   checkpoint   text not null references public.qc_checkpoints (key),                -- D
   description  text not null check (char_length(btrim(description)) between 1 and 2000), -- E
@@ -271,7 +277,7 @@ begin
       raise exception 'الفيلا ليست من هذا المشروع';
     end if;
   end if;
-  if new.status = 'closed' and new.date_closed is null then new.date_closed := current_date; end if;
+  if new.status = 'closed' and new.date_closed is null then new.date_closed := public.today_iq(); end if;
   if new.status = 'open' then new.date_closed := null; end if;
   return new;
 end $$;
@@ -354,6 +360,7 @@ alter table public.audit_log      enable row level security;
 
 revoke all on all tables in schema public from anon;
 revoke execute on all functions in schema public from anon, public;
+grant execute on function public.today_iq() to authenticated, service_role;
 grant execute on function public.app_role(), public.is_staff(), public.is_admin() to authenticated;
 
 grant usage on schema public to authenticated;
@@ -383,11 +390,12 @@ end $$;
 
 do $$
 declare
-  member text := 'public.app_role() is not null';
-  staff  text := 'public.is_staff()';
-  admin  text := 'public.is_admin()';
+  -- (select …) تجعل PostgreSQL يحسب الدور مرة واحدة لكل استعلام بدل مرة لكل صف
+  member text := '(select public.app_role()) is not null';
+  staff  text := '(select public.is_staff())';
+  admin  text := '(select public.is_admin())';
 begin
-  perform pg_temp.pol('profiles', 'profiles_select', 'select', 'id = auth.uid() or ' || member, null);
+  perform pg_temp.pol('profiles', 'profiles_select', 'select', 'id = (select auth.uid()) or ' || member, null);
   perform pg_temp.pol('profiles', 'profiles_update', 'update', admin, admin);
 
   perform pg_temp.pol('projects', 'projects_select', 'select', member, null);
@@ -419,7 +427,7 @@ begin
   perform pg_temp.pol('materials', 'materials_select', 'select', member, null);
   perform pg_temp.pol('materials', 'materials_insert', 'insert', null, staff);
   perform pg_temp.pol('materials', 'materials_update', 'update', staff, staff);
-  perform pg_temp.pol('materials', 'materials_delete', 'delete', staff, null);
+  perform pg_temp.pol('materials', 'materials_delete', 'delete', admin, null);
 
   perform pg_temp.pol('audit_log', 'audit_select', 'select', admin, null);
 end $$;
@@ -452,13 +460,16 @@ create table if not exists public.project_stages (
 create or replace function public.project_stage_stamp()
 returns trigger language plpgsql set search_path = public as $$
 begin
+  -- المرحلة لا تُنقل لمشروع آخر ولا تتغيّر مرحلتها
+  if tg_op = 'UPDATE' then new.project_id := old.project_id; new.checkpoint := old.checkpoint; end if;
   if new.status = 'not_started' then
     new.start_date := null; new.end_date := null;
   elsif new.status = 'in_progress' then
-    new.start_date := coalesce(new.start_date, current_date); new.end_date := null;
+    new.start_date := coalesce(new.start_date, public.today_iq()); new.end_date := null;
   elsif new.status = 'done' then
-    new.end_date := coalesce(new.end_date, current_date);
-    new.start_date := coalesce(new.start_date, least(new.end_date, current_date));
+    new.end_date := coalesce(new.end_date, public.today_iq());
+    -- البدء لا يتجاوز الانتهاء (مرحلة بتاريخ بدء مستقبلي تُكمل اليوم بدل رسالة "قيمة غير مقبولة")
+    new.start_date := least(coalesce(new.start_date, new.end_date), new.end_date);
   end if;
   new.updated_by := auth.uid();
   new.updated_at := now();
@@ -476,13 +487,13 @@ alter table public.project_stages enable row level security;
 revoke all on public.project_stages from anon;
 grant select, insert, update, delete on public.project_stages to authenticated;
 drop policy if exists stages_select on public.project_stages;
-create policy stages_select on public.project_stages for select to authenticated using (public.app_role() is not null);
+create policy stages_select on public.project_stages for select to authenticated using ((select public.app_role()) is not null);
 drop policy if exists stages_insert on public.project_stages;
-create policy stages_insert on public.project_stages for insert to authenticated with check (public.is_staff());
+create policy stages_insert on public.project_stages for insert to authenticated with check ((select public.is_staff()));
 drop policy if exists stages_update on public.project_stages;
-create policy stages_update on public.project_stages for update to authenticated using (public.is_staff()) with check (public.is_staff());
+create policy stages_update on public.project_stages for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
 drop policy if exists stages_delete on public.project_stages;
-create policy stages_delete on public.project_stages for delete to authenticated using (public.is_admin());
+create policy stages_delete on public.project_stages for delete to authenticated using ((select public.is_admin()));
 
 -- ==========================================================
 -- بيانات العميل والعقد ومواعيد المشروع
@@ -522,13 +533,13 @@ alter table public.crews enable row level security;
 revoke all on public.crews from anon;
 grant select, insert, update, delete on public.crews to authenticated;
 drop policy if exists crews_select on public.crews;
-create policy crews_select on public.crews for select to authenticated using (public.app_role() is not null);
+create policy crews_select on public.crews for select to authenticated using ((select public.app_role()) is not null);
 drop policy if exists crews_insert on public.crews;
-create policy crews_insert on public.crews for insert to authenticated with check (public.is_staff());
+create policy crews_insert on public.crews for insert to authenticated with check ((select public.is_staff()));
 drop policy if exists crews_update on public.crews;
-create policy crews_update on public.crews for update to authenticated using (public.is_staff()) with check (public.is_staff());
+create policy crews_update on public.crews for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
 drop policy if exists crews_delete on public.crews;
-create policy crews_delete on public.crews for delete to authenticated using (public.is_admin());
+create policy crews_delete on public.crews for delete to authenticated using ((select public.is_admin()));
 
 -- ==========================================================
 -- فرقة وحدة المجمّع من قائمة الفرق (بدل النص الحر)
@@ -695,13 +706,13 @@ grant select, insert, delete on public.stage_requests to authenticated;
 revoke execute on function public.my_crew(), public.stage_request_check(), public.review_stage_request(uuid, boolean, text) from public, anon;
 grant execute on function public.my_crew(), public.review_stage_request(uuid, boolean, text) to authenticated;
 drop policy if exists requests_select on public.stage_requests;
-create policy requests_select on public.stage_requests for select to authenticated using (public.app_role() is not null);
+create policy requests_select on public.stage_requests for select to authenticated using ((select public.app_role()) is not null);
 drop policy if exists requests_insert on public.stage_requests;
-create policy requests_insert on public.stage_requests for insert to authenticated with check (public.app_role() is not null and requested_by = auth.uid());
+create policy requests_insert on public.stage_requests for insert to authenticated with check ((select public.app_role()) is not null and requested_by = (select auth.uid()));
 -- الفني يسحب طلبه ما دام بانتظار الموافقة، والمدير يحذف أي طلب
 drop policy if exists requests_delete on public.stage_requests;
 create policy requests_delete on public.stage_requests for delete to authenticated
-  using ((requested_by = auth.uid() and status = 'pending') or public.is_admin());
+  using ((requested_by = (select auth.uid()) and status = 'pending') or (select public.is_admin()));
 
 -- مخزن الصور: خاص (غير عام)، 5 ميغا للصورة، JPEG/PNG/WebP فقط.
 -- المسار: <المشروع>/<المرسل>/<معرّف>.jpg، وكل مستخدم يرفع في مجلده فقط
@@ -710,13 +721,13 @@ values ('stage-photos', 'stage-photos', false, 5242880, array['image/jpeg', 'ima
 on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
 drop policy if exists stage_photos_select on storage.objects;
 create policy stage_photos_select on storage.objects for select to authenticated
-  using (bucket_id = 'stage-photos' and public.app_role() is not null);
+  using (bucket_id = 'stage-photos' and (select public.app_role()) is not null);
 drop policy if exists stage_photos_insert on storage.objects;
 create policy stage_photos_insert on storage.objects for insert to authenticated
-  with check (bucket_id = 'stage-photos' and public.app_role() is not null and (storage.foldername(name))[2] = auth.uid()::text);
+  with check (bucket_id = 'stage-photos' and (select public.app_role()) is not null and (storage.foldername(name))[2] = (select auth.uid())::text);
 drop policy if exists stage_photos_delete on storage.objects;
 create policy stage_photos_delete on storage.objects for delete to authenticated
-  using (bucket_id = 'stage-photos' and ((storage.foldername(name))[2] = auth.uid()::text or public.is_admin()));
+  using (bucket_id = 'stage-photos' and ((storage.foldername(name))[2] = (select auth.uid())::text or (select public.is_admin())));
 
 -- ==========================================================
 -- أداء الفنيين: من سجّل كل قراءة (ضغط، فاكيوم، شحن) ومتى، يُملأ على الخادم ولا يُرسل من الهاتف.
@@ -766,7 +777,7 @@ create index if not exists stage_requests_by_idx        on public.stage_requests
 
 -- يُملأ "من سجّل" لكل قسم تغيّرت قراءاته فقط، وما يرسله الهاتف في هذه الأعمدة يُتجاهل
 create or replace function public.test_record_stamp()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 declare me uuid := auth.uid();
 begin
   if tg_op = 'UPDATE' then
@@ -856,6 +867,140 @@ revoke execute on function public.tech_performance(date, date) from public, anon
 grant execute on function public.tech_performance(date, date) to authenticated;
 
 -- ==========================================================
+-- الأداء: فهرس لكل مفتاح أجنبي (يسرّع الربط بين الجداول والحذف المتسلسل)
+-- ==========================================================
+create index if not exists materials_created_by_idx      on public.materials (created_by);
+create index if not exists ncrs_checkpoint_idx           on public.ncrs (checkpoint);
+create index if not exists ncrs_created_by_idx           on public.ncrs (created_by);
+create index if not exists ncrs_unit_idx                 on public.ncrs (unit_id);
+create index if not exists profiles_crew_idx             on public.profiles (crew_id);
+create index if not exists project_stages_checkpoint_idx on public.project_stages (checkpoint);
+create index if not exists project_stages_crew_idx       on public.project_stages (crew_id);
+create index if not exists project_stages_updated_by_idx on public.project_stages (updated_by);
+create index if not exists projects_created_by_idx       on public.projects (created_by);
+create index if not exists stage_requests_reviewed_by_idx on public.stage_requests (reviewed_by);
+create index if not exists test_records_updated_by_idx   on public.test_records (updated_by);
+create index if not exists unit_checks_checkpoint_idx    on public.unit_checks (checkpoint);
+
+-- ==========================================================
+-- النسخ الاحتياطي التلقائي
+-- كل ليلة تُحفظ نسخة كاملة من كل جداول البيانات داخل القاعدة (آخر 30 نسخة تلقائية وآخر 10 يدوية).
+-- تحمي من الأخطاء: حذف بالخطأ، استيراد خاطئ، تعديل جماعي. ولا تحمي من فقدان المشروع كله،
+-- لذلك ينزّل المدير نسخة إلى جهازه أو Google Drive من صفحة "نسخة احتياطية" بانتظام.
+-- الصور (stage-photos) ليست ضمن النسخة.
+-- ==========================================================
+create table if not exists public.backups (
+  id          bigint generated always as identity primary key,
+  taken_at    timestamptz not null default now(),
+  kind        text not null check (kind in ('auto', 'manual')),
+  taken_by    uuid,   -- بلا مفتاح أجنبي: تبقى النسخة حتى لو حُذف المستخدم
+  counts      jsonb not null,
+  size_bytes  integer not null,
+  data        jsonb not null
+);
+create index if not exists backups_kind_at_idx on public.backups (kind, taken_at desc);
+alter table public.backups enable row level security;
+revoke all on public.backups from anon, authenticated;
+-- المدير يرى قائمة النسخ فقط، ومحتواها عبر backup_data() التي تسجّل كل تنزيل في سجل العمليات
+grant select (id, taken_at, kind, taken_by, counts, size_bytes) on public.backups to authenticated;
+drop policy if exists backups_select on public.backups;
+create policy backups_select on public.backups for select to authenticated using ((select public.is_admin()));
+
+create or replace function public.make_backup(p_kind text)
+returns bigint language plpgsql security definer set search_path = public as $$
+declare t text; r jsonb; d jsonb := '{}'; c jsonb := '{}'; new_id bigint;
+begin
+  for t in select k.relname from pg_class k join pg_namespace n on n.oid = k.relnamespace
+           where n.nspname = 'public' and k.relkind = 'r' and k.relname <> 'backups' order by 1 loop
+    execute format('select coalesce(jsonb_agg(to_jsonb(x)), ''[]''::jsonb) from public.%I x', t) into r;
+    d := d || jsonb_build_object(t, r);
+    c := c || jsonb_build_object(t, jsonb_array_length(r));
+  end loop;
+  d := jsonb_build_object('app', 'surour', 'format', 1, 'taken_at', now(), 'tables', d);
+  insert into public.backups (kind, taken_by, counts, size_bytes, data)
+  values (p_kind, auth.uid(), c, octet_length(d::text), d) returning id into new_id;
+  delete from public.backups where kind = p_kind and id not in (
+    select id from public.backups where kind = p_kind order by taken_at desc, id desc
+    limit case when p_kind = 'auto' then 30 else 10 end);
+  return new_id;
+end $$;
+revoke execute on function public.make_backup(text) from public, anon, authenticated;
+
+create or replace function public.take_backup()
+returns bigint language plpgsql security definer set search_path = public as $$
+declare new_id bigint;
+begin
+  if not public.is_admin() then raise exception 'النسخ الاحتياطي للمدير فقط' using errcode = '42501'; end if;
+  if exists (select 1 from public.backups where kind = 'manual' and taken_at > now() - interval '2 minutes') then
+    raise exception 'أُخذت نسخة قبل أقل من دقيقتين، انتظر قليلاً';
+  end if;
+  new_id := public.make_backup('manual');
+  insert into public.audit_log (actor, table_name, row_id, action) values (auth.uid(), 'backups', new_id::text, 'INSERT');
+  return new_id;
+end $$;
+
+create or replace function public.backup_data(p_id bigint)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare d jsonb;
+begin
+  if not public.is_admin() then raise exception 'النسخ الاحتياطي للمدير فقط' using errcode = '42501'; end if;
+  select data into d from public.backups where id = p_id;
+  if d is null then raise exception 'النسخة غير موجودة'; end if;
+  insert into public.audit_log (actor, table_name, row_id, action) values (auth.uid(), 'backups', p_id::text, 'DOWNLOAD');
+  return d;
+end $$;
+revoke execute on function public.take_backup(), public.backup_data(bigint) from public, anon;
+grant execute on function public.take_backup(), public.backup_data(bigint) to authenticated;
+
+-- الجدولة: كل ليلة 23:00 UTC (الثانية فجراً بتوقيت بغداد). على PostgreSQL بلا pg_cron يُتخطّى هذا الجزء.
+do $$
+begin
+  if exists (select 1 from pg_available_extensions where name = 'pg_cron') then
+    create extension if not exists pg_cron;
+    perform cron.schedule('surour-nightly-backup', '0 23 * * *', $q$select public.make_backup('auto')$q$);
+  else
+    raise notice 'pg_cron غير متوفر هنا: النسخ التلقائي الليلي لن يعمل';
+  end if;
+end $$;
+
+-- ==========================================================
+-- تقوية الحماية (مراجعة الوكلاء، المجموعة 2)
+-- ==========================================================
+-- الحساب الجديد يبدأ غير مفعّل
+alter table public.profiles alter column active set default false;
+
+-- "من أنشأ" يُحدَّد على الخادم فلا يُزوَّر من الهاتف
+create or replace function public.set_created_by()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  new.created_by := coalesce(auth.uid(), new.created_by);
+  return new;
+end $$;
+drop trigger if exists projects_created_by on public.projects;
+create trigger projects_created_by before insert on public.projects for each row execute function public.set_created_by();
+drop trigger if exists materials_created_by on public.materials;
+create trigger materials_created_by before insert on public.materials for each row execute function public.set_created_by();
+
+-- رابط الموقع: خرائط Google وWaze وApple فقط (لا صفحات تصيّد تُفتح للفنيين)
+alter table public.projects drop constraint if exists projects_map_url_check;
+alter table public.projects add constraint projects_map_url_check check (map_url is null or (char_length(map_url) <= 500 and
+  map_url ~ '^https://((www\.)?google\.[a-z.]{2,8}/maps|maps\.google\.[a-z.]{2,8}|maps\.app\.goo\.gl|goo\.gl/maps|(www\.|ul\.)?waze\.com|maps\.apple\.com)([/?#][^[:space:]<>"]*)?$'));
+
+-- لا يبقى النظام بلا مدير: لا تعطيل ولا تخفيض لآخر مدير مفعّل
+create or replace function public.protect_last_admin()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if old.role = 'admin' and old.active and (new.role <> 'admin' or not new.active)
+     and not exists (select 1 from public.profiles where role = 'admin' and active and id <> old.id) then
+    raise exception 'لا يمكن تعطيل أو تخفيض آخر مدير في النظام';
+  end if;
+  return new;
+end $$;
+revoke execute on function public.protect_last_admin() from public, anon;
+drop trigger if exists profiles_last_admin on public.profiles;
+create trigger profiles_last_admin before update on public.profiles for each row execute function public.protect_last_admin();
+
+-- ==========================================================
 -- مهام المشروع (فكرة من TaskFlow): مهمة لها عنوان ومسؤول (فني) وموعد وأولوية،
 -- وقد ترتبط بمرحلة. المدير والمشرف ينشئونها ويعدّلونها ويحرّكونها مباشرة.
 -- الفني لا يعدّل المهمة: يرسل تقريراً (بدأت/أنجزت) عن مهمة مسندة له، ويطبَّق بعد الموافقة.
@@ -912,13 +1057,13 @@ alter table public.project_tasks enable row level security;
 revoke all on public.project_tasks from anon;
 grant select, insert, update, delete on public.project_tasks to authenticated;
 drop policy if exists tasks_select on public.project_tasks;
-create policy tasks_select on public.project_tasks for select to authenticated using (public.app_role() is not null);
+create policy tasks_select on public.project_tasks for select to authenticated using ((select public.app_role()) is not null);
 drop policy if exists tasks_insert on public.project_tasks;
-create policy tasks_insert on public.project_tasks for insert to authenticated with check (public.is_staff());
+create policy tasks_insert on public.project_tasks for insert to authenticated with check ((select public.is_staff()));
 drop policy if exists tasks_update on public.project_tasks;
-create policy tasks_update on public.project_tasks for update to authenticated using (public.is_staff()) with check (public.is_staff());
+create policy tasks_update on public.project_tasks for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
 drop policy if exists tasks_delete on public.project_tasks;
-create policy tasks_delete on public.project_tasks for delete to authenticated using (public.is_staff());
+create policy tasks_delete on public.project_tasks for delete to authenticated using ((select public.is_staff()));
 
 -- تقرير الفني عن مهمة: بدأت أو أُنجزت، مع ملاحظة وصورة اختيارية (في مخزن stage-photos نفسه)
 create table if not exists public.task_requests (
@@ -988,12 +1133,12 @@ grant select, insert, delete on public.task_requests to authenticated;
 revoke execute on function public.project_task_stamp(), public.task_request_check(), public.review_task_request(uuid, boolean, text) from public, anon;
 grant execute on function public.review_task_request(uuid, boolean, text) to authenticated;
 drop policy if exists task_requests_select on public.task_requests;
-create policy task_requests_select on public.task_requests for select to authenticated using (public.app_role() is not null);
+create policy task_requests_select on public.task_requests for select to authenticated using ((select public.app_role()) is not null);
 drop policy if exists task_requests_insert on public.task_requests;
-create policy task_requests_insert on public.task_requests for insert to authenticated with check (public.app_role() is not null and requested_by = auth.uid());
+create policy task_requests_insert on public.task_requests for insert to authenticated with check ((select public.app_role()) is not null and requested_by = (select auth.uid()));
 drop policy if exists task_requests_delete on public.task_requests;
 create policy task_requests_delete on public.task_requests for delete to authenticated
-  using ((requested_by = auth.uid() and status = 'pending') or public.is_admin());
+  using ((requested_by = (select auth.uid()) and status = 'pending') or (select public.is_admin()));
 
 -- ==========================================================
 -- التعليقات، والإشعارات (داخل التطبيق وعلى الموبايل)، ومرفقات المشروع — أفكار من TaskFlow
@@ -1042,13 +1187,13 @@ alter table public.comments enable row level security;
 revoke all on public.comments from anon;
 grant select, insert, update, delete on public.comments to authenticated;
 drop policy if exists comments_select on public.comments;
-create policy comments_select on public.comments for select to authenticated using (public.app_role() is not null);
+create policy comments_select on public.comments for select to authenticated using ((select public.app_role()) is not null);
 drop policy if exists comments_insert on public.comments;
-create policy comments_insert on public.comments for insert to authenticated with check (public.app_role() is not null and author = auth.uid());
+create policy comments_insert on public.comments for insert to authenticated with check ((select public.app_role()) is not null and author = (select auth.uid()));
 drop policy if exists comments_update on public.comments;
-create policy comments_update on public.comments for update to authenticated using (author = auth.uid() and public.app_role() is not null) with check (author = auth.uid());
+create policy comments_update on public.comments for update to authenticated using (author = (select auth.uid()) and (select public.app_role()) is not null) with check (author = (select auth.uid()));
 drop policy if exists comments_delete on public.comments;
-create policy comments_delete on public.comments for delete to authenticated using (author = auth.uid() or public.is_admin());
+create policy comments_delete on public.comments for delete to authenticated using (author = (select auth.uid()) or (select public.is_admin()));
 
 -- ---------- الإشعارات ----------
 -- تُنشأ على الخادم فقط (من المشغّلات أدناه). كل مستخدم يرى إشعاراته ويعلّمها مقروءة.
@@ -1070,11 +1215,11 @@ revoke all on public.notifications from anon;
 grant select, delete on public.notifications to authenticated;
 grant update (read_at) on public.notifications to authenticated;
 drop policy if exists notifications_select on public.notifications;
-create policy notifications_select on public.notifications for select to authenticated using (user_id = auth.uid());
+create policy notifications_select on public.notifications for select to authenticated using (user_id = (select auth.uid()));
 drop policy if exists notifications_update on public.notifications;
-create policy notifications_update on public.notifications for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
+create policy notifications_update on public.notifications for update to authenticated using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 drop policy if exists notifications_delete on public.notifications;
-create policy notifications_delete on public.notifications for delete to authenticated using (user_id = auth.uid());
+create policy notifications_delete on public.notifications for delete to authenticated using (user_id = (select auth.uid()));
 
 -- اشتراكات الموبايل (Web Push): كل جهاز يسجّل اشتراكه
 create table if not exists public.push_subscriptions (
@@ -1090,11 +1235,11 @@ alter table public.push_subscriptions enable row level security;
 revoke all on public.push_subscriptions from anon;
 grant select, insert, delete on public.push_subscriptions to authenticated;
 drop policy if exists push_select on public.push_subscriptions;
-create policy push_select on public.push_subscriptions for select to authenticated using (user_id = auth.uid());
+create policy push_select on public.push_subscriptions for select to authenticated using (user_id = (select auth.uid()));
 drop policy if exists push_insert on public.push_subscriptions;
-create policy push_insert on public.push_subscriptions for insert to authenticated with check (user_id = auth.uid() and public.app_role() is not null);
+create policy push_insert on public.push_subscriptions for insert to authenticated with check (user_id = (select auth.uid()) and (select public.app_role()) is not null);
 drop policy if exists push_delete on public.push_subscriptions;
-create policy push_delete on public.push_subscriptions for delete to authenticated using (user_id = auth.uid());
+create policy push_delete on public.push_subscriptions for delete to authenticated using (user_id = (select auth.uid()));
 
 -- أسرار داخلية للخادم فقط (لا يقرؤها أي مستخدم): مفاتيح VAPID ورمز استدعاء دالة الإرسال
 create table if not exists public.app_secrets (
@@ -1265,13 +1410,13 @@ grant select, insert, update, delete on public.project_files to authenticated;
 -- الفني لا يرى الملفات المعلّمة "للإدارة فقط"
 drop policy if exists files_select on public.project_files;
 create policy files_select on public.project_files for select to authenticated
-  using (public.app_role() is not null and (not staff_only or public.is_staff()));
+  using ((select public.app_role()) is not null and (not staff_only or (select public.is_staff())));
 drop policy if exists files_insert on public.project_files;
-create policy files_insert on public.project_files for insert to authenticated with check (public.is_staff());
+create policy files_insert on public.project_files for insert to authenticated with check ((select public.is_staff()));
 drop policy if exists files_update on public.project_files;
-create policy files_update on public.project_files for update to authenticated using (public.is_staff()) with check (public.is_staff());
+create policy files_update on public.project_files for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
 drop policy if exists files_delete on public.project_files;
-create policy files_delete on public.project_files for delete to authenticated using (public.is_staff());
+create policy files_delete on public.project_files for delete to authenticated using ((select public.is_staff()));
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('project-files', 'project-files', false, 20971520, array['application/pdf', 'image/jpeg', 'image/png', 'image/webp',
@@ -1280,13 +1425,13 @@ on conflict (id) do update set public = false, file_size_limit = excluded.file_s
 -- قراءة الملف من المخزن بنفس شرط جدول المرفقات (الحماية على الخادم، لا في الواجهة)
 drop policy if exists project_files_read on storage.objects;
 create policy project_files_read on storage.objects for select to authenticated
-  using (bucket_id = 'project-files' and exists (select 1 from public.project_files f where f.path = storage.objects.name and (not f.staff_only or public.is_staff()) and public.app_role() is not null));
+  using (bucket_id = 'project-files' and exists (select 1 from public.project_files f where f.path = storage.objects.name and (not f.staff_only or (select public.is_staff())) and (select public.app_role()) is not null));
 drop policy if exists project_files_write on storage.objects;
 create policy project_files_write on storage.objects for insert to authenticated
-  with check (bucket_id = 'project-files' and public.is_staff());
+  with check (bucket_id = 'project-files' and (select public.is_staff()));
 drop policy if exists project_files_remove on storage.objects;
 create policy project_files_remove on storage.objects for delete to authenticated
-  using (bucket_id = 'project-files' and public.is_staff());
+  using (bucket_id = 'project-files' and (select public.is_staff()));
 
 -- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:

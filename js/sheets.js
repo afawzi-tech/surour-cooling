@@ -7,7 +7,8 @@
 (() => {
   'use strict';
 
-  const { h, clear, toast, confirmBox, num, date } = window.UI;
+  const UI = window.UI;
+  const { h, clear, toast, confirmBox, num } = UI;
   const A = window.App;
   const S = A.state;
   const X = window.XLSX_LITE;
@@ -25,7 +26,18 @@
   const RES_KEYS = ['pass', 'fail', 'pending', 'na'];
   const SYM = { pass: '✓', fail: '✗', pending: '·', na: '—' };
   const CHECK_AR = { OK: 'مقبول', CHECK: 'راجع' };
-  const today = () => new Date().toISOString().slice(0, 10);
+  const today = () => new Date().toLocaleDateString('en-CA');   // التاريخ المحلي (بغداد)
+  // الرقم التالي = أكبر رقم موجود + 1، حتى لا يتكرر بعد حذف
+  const nextNcrNo = (nos) => 'NCR-' + String(nos.reduce((m, x) => Math.max(m, Number(String(x || '').match(/(\d+)\s*$/)?.[1] || 0)), 0) + 1).padStart(3, '0');
+  // أرقام ونصوص لاتينية داخل جملة عربية: تبقى بترتيبها ولا تنقلب رموزها (≤ ≥ % والتواريخ)
+  const ltr = (t) => h('bdi', { dir: 'ltr' }, String(t));
+  // أرقام من لوحة مفاتيح عربية: ٠-٩ و۰-۹ ← 0-9، والفاصلة العشرية ٫ أو , ← .
+  // يرجع null للفارغ وNaN لغير الصالح (حتى لا تُحفظ قيمة مرفوضة كفراغ)
+  const toNum = (v) => {
+    const t = String(v ?? '').trim().replace(/[٠-٩]/g, (c) => c.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (c) => c.charCodeAt(0) - 0x6F0)
+      .replace(/[٫,]/g, '.').replace(/\s+/g, '');
+    return t === '' ? null : /^[-+]?\d*\.?\d+$/.test(t) ? Number(t) : NaN;
+  };
   const projectOf = (id) => S.projects.find((p) => p.id === id);
   const blank = (v) => v === null || v === undefined || v === '';
   const mobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -84,8 +96,7 @@
   // بطاقة العميل والمواعيد
   function clientCard(p, sp) {
     const sc = A.schedule(p, sp.pct, sp.status);
-    const fc = A.forecast(p, sp.pct, sp.status);
-    const safeMap = p.map_url && /^https:\/\/[^\s<>"]+$/.test(p.map_url) ? p.map_url : null;
+    const safeMap = p.map_url && A.MAP_URL.test(p.map_url) ? p.map_url : null;
     const items = [
       p.customer_name ? ['العميل', p.customer_name] : null,
       p.customer_phone ? ['الهاتف', h('a', { href: 'tel:' + p.customer_phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, p.customer_phone)] : null,
@@ -94,11 +105,9 @@
       p.start_date ? ['البدء المخطط', h('span', { dir: 'ltr' }, p.start_date)] : null,
       p.due_date ? ['التسليم', h('span', null, h('span', { dir: 'ltr' }, p.due_date), ' ', h('b', { class: 'due-tag' + (sc.late ? ' late' : sc.behind ? ' behind' : '') }, A.dueText(sc, sp.status)))] : null
     ].filter(Boolean);
-    if (!items.length && !fc) return A.isStaff() ? h('p', { class: 'client-empty muted small' }, 'لا توجد بيانات عميل أو مواعيد. ', h('a', { href: `#/project/${p.id}/settings` }, 'أضفها من "بيانات المشروع"')) : null;
-    return h('section', { class: 'client-card' }, h('dl', null, items.map(([k, v]) => h('div', null, h('dt', null, k), h('dd', null, v)))),
-      sc.behind ? h('p', { class: 'behind-note' }, `متأخر عن الجدول: الإنجاز ${A.pctText(sp.pct)} والمتوقع حسب الوقت المنقضي ${A.pctText(sc.expected)}.`) : null,
-      fc ? h('p', { class: 'fc-note' + (fc.diff !== null && fc.diff < 0 ? ' late' : fc.diff > 0 ? ' early' : '') },
-        A.forecastText(fc) + '.', h('small', null, ` (${fc.actual ? 'من بدء العمل الفعلي' : 'من البدء المخطط'} ${fc.start}: ${A.daysAr(fc.elapsed)} لإنجاز ${A.pctText(sp.pct)})`)) : null);
+    if (!items.length) return A.isStaff() ? h('p', { class: 'client-empty muted small' }, 'لا توجد بيانات عميل أو مواعيد. ', h('a', { href: `#/project/${p.id}/settings` }, 'أضفها من "بيانات المشروع"')) : null;
+    return h('details', { class: 'client-card fc' }, h('summary', null, 'تفاصيل العميل والعقد'),
+      h('dl', null, items.map(([k, v]) => h('div', null, h('dt', null, k), h('dd', null, v)))));
   }
 
   async function saveStage(p, key, patch) {
@@ -109,21 +118,48 @@
     return r.data;
   }
 
+  // رأس المشروع مثل صفحة الحساب: حلقة الإنجاز، الاسم، وأزرار الاتصال والخريطة
+  function projectHead(p, sp) {
+    const sc = A.schedule(p, sp.pct, sp.status);
+    const meta = [A.PTYPES[p.project_type], p.governorate, p.city, p.brand].filter(Boolean).join(' · ');
+    const cur = sp.status !== 'done' ? sp.cur : null;
+    const crew = cur?.s.crew_id ? A.crewOf(cur.s.crew_id) : null;
+    const tel = (x) => 'tel:' + String(x).replace(/[^0-9+]/g, '');
+    const safeMap = p.map_url && A.MAP_URL.test(p.map_url) ? p.map_url : null;
+    const idle = sp.status === 'in_progress' && sp.last ? daysAgo(sp.last.slice(0, 10)) : 0;
+    const fc = A.forecast(p, sp.pct, sp.status);
+    const why = [sc.late ? `فات موعد التسليم بـ${A.daysAr(-sc.daysLeft)}` : '', !sc.late && sc.behind ? ['متأخر عن الجدول: أُنجز ', A.pctText(sp.pct), ' والمتوقع ', A.pctText(sc.expected)] : '',
+      idle >= 14 && cur ? `المرحلة الحالية "${cur.c.name_ar}" لم تتحرك منذ ${A.daysAr(idle)}` : ''].filter((x) => x && x.length);
+    return h('header', { class: 'phead' + (sc.late ? ' bad' : why.length ? ' warn' : '') },
+      h('a', { href: '#/projects', class: 'phead-back', 'aria-label': 'رجوع إلى كل المشاريع' }, '→'),
+      h('div', { class: 'phead-top' },
+        h('span', { class: 'st-ring lg', style: A.ringStyle(sp.pct) }, h('span', { class: 'st-face' }, h('b', null, A.pctText(sp.pct)), h('small', null, `${num(sp.done)} من ${num(sp.total)}`))),
+        h('div', { class: 'phead-t' }, h('h1', null, p.client), meta ? h('p', null, meta) : null,
+          p.customer_name ? h('p', { class: 'phead-cust' }, 'العميل: ', p.customer_name) : null)),
+      why.length ? h('div', { class: 'phead-why', role: 'status' }, why.map((w) => h('p', null, w))) : null,
+      fc ? h('p', { class: 'fc-note' + (fc.diff !== null && fc.diff < 0 ? ' late' : fc.diff > 0 ? ' early' : '') },
+        A.forecastText(fc) + '.', h('small', null, ` (${fc.actual ? 'من بدء العمل الفعلي' : 'من البدء المخطط'} ${fc.start}: ${A.daysAr(fc.elapsed)} لإنجاز ${A.pctText(sp.pct)})`)) : null,
+      h('div', { class: 'phead-acts' },
+        crew?.phone ? h('a', { href: tel(crew.phone), class: 'pill-btn' }, '📞 ', crew.name) : null,
+        p.customer_phone ? h('a', { href: tel(p.customer_phone), class: 'pill-btn' }, '📞 العميل') : null,
+        safeMap ? h('a', { href: safeMap, target: '_blank', rel: 'noopener noreferrer', class: 'pill-btn' }, '🗺️ الموقع') : null,
+        p.due_date ? h('span', { class: 'pill-btn due ' + (sc.late ? 'bad' : sc.behind ? 'warn' : '') }, '📅 ', A.dueText(sc, sp.status)) : null));
+  }
+
   function stagesProject(p, r) {
-    const TABS = [['stages', 'مراحل العمل'], window.Tasks ? ['tasks', 'المهام'] : null, window.Collab ? ['talk', 'النقاش'] : null,
-      window.Collab ? ['files', 'الملفات'] : null, ['settings', 'بيانات المشروع']].filter(Boolean);
+    const TABS = [['stages', 'المراحل'], window.Tasks ? ['tasks', 'المهام'] : null, window.Collab ? ['talk', 'النقاش'] : null,
+      window.Collab ? ['files', 'الملفات'] : null, ['settings', 'البيانات']].filter(Boolean);
     const tab = TABS.some(([k]) => k === r.tab) ? r.tab : 'stages';
-    const meta = [A.PTYPES[p.project_type], p.governorate, p.city, p.brand].filter(Boolean).join('، ');
+    const sp = A.stageProgress(p);
     return h('div', { class: 'book stages-book' },
-      h('div', { class: 'book-head' },
-        h('div', null, h('a', { href: '#/projects', class: 'link small back' }, '→ كل المشاريع'), h('h1', null, p.client),
-          meta ? h('p', { class: 'muted small' }, meta) : null)),
-      h('nav', { class: 'sheet-tabs', 'aria-label': 'أقسام المشروع' },
+      projectHead(p, sp),
+      h('nav', { class: 'seg-tabs', 'aria-label': 'أقسام المشروع' },
         TABS.map(([k, l]) =>
-          h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null }, l))),
-      tab === 'stages' ? clientCard(p, A.stageProgress(p)) : null,
+          h('a', { href: `#/project/${p.id}/${k}`, class: k === tab ? 'on' : '', 'aria-current': k === tab ? 'page' : null }, l))),
       h('div', { class: 'sheet' }, tab === 'settings' ? settingsPanel(p, false) : tab === 'tasks' ? window.Tasks.projectPanel(p)
-        : tab === 'talk' ? window.Collab.talkPanel(p) : tab === 'files' ? window.Collab.filesPanel(p) : stagesSheet(p)));
+        : tab === 'talk' ? window.Collab.talkPanel(p) : tab === 'files' ? window.Collab.filesPanel(p) : stagesSheet(p)),
+      // تفاصيل العميل والعقد مطوية تحت المراحل، حتى تبقى "المرحلة الحالية" أول ما يُرى
+      tab === 'settings' ? null : clientCard(p, sp));
   }
 
   function stagesSheet(p) {
@@ -136,21 +172,33 @@
     const cur = sp.status === 'done' ? null : sp.cur;
     const nextAfter = (key) => sp.list.find((x) => x.c.position > S.checkpoints.find((c) => c.key === key).position && x.s.status === 'not_started');
 
+    // تراجع: نعيد المراحل كما كانت قبل الضغط (الحالة والتواريخ والمنفّذ)
+    const snap = (x) => ({ key: x.c.key, row: { status: x.s.status, start_date: x.s.start_date ?? null, end_date: x.s.end_date ?? null, crew: x.s.crew ?? null, crew_id: x.s.crew_id ?? null, notes: x.s.notes ?? null } });
+    const undoWith = (snaps) => ({ label: 'تراجع', run: async () => {
+      for (const x of snaps) await saveStage(p, x.key, x.row);
+      toast('تم التراجع'); A.render();
+    } });
+
     // إكمال المرحلة الحالية وبدء التالية
     const complete = async (btn) => {
       btn.disabled = true;
       const nx = nextAfter(cur.c.key);
+      const before = [snap(cur), ...(nx ? [snap(nx)] : [])];
       const ok = await saveStage(p, cur.c.key, { status: 'done', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
-      // التالية تبقى مع منفّذها إن كانت مسندة مسبقاً
+      // المرحلة التالية تحتفظ بمنفّذها إن كانت مسندة مسبقاً، وإلا تأخذ منفّذ الحالية
       if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: nx.s.crew ?? cur.s.crew ?? null, crew_id: nx.s.crew_id ?? cur.s.crew_id ?? null });
-      if (ok) { toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل'); S._just = { p: p.id, done: cur.c.key, start: nx?.c.key || null, pct: sp.pct }; }
+      if (ok) {
+        toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل', 'ok', undoWith(before));
+        S._just = { p: p.id, done: cur.c.key, start: nx?.c.key || null, pct: sp.pct };
+      }
       A.render();
     };
     const start = async (btn, crew, team) => {
       btn.disabled = true;
-      const n = crew.value === '' ? null : Number(crew.value);
+      const n = toNum(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { btn.disabled = false; return toast('عدد الكوادر من 0 إلى 500', 'error'); }
-      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n, crew_id: team.value || null })) { toast(`بدأت مرحلة "${cur.c.name_ar}"`); S._just = { p: p.id, done: null, start: cur.c.key, pct: sp.pct }; }
+      const before = [snap(cur)];
+      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n, crew_id: team.value || null })) { toast(`بدأت مرحلة "${cur.c.name_ar}"`, 'ok', undoWith(before)); S._just = { p: p.id, done: null, start: cur.c.key, pct: sp.pct }; }
       A.render();
     };
 
@@ -160,7 +208,7 @@
         h('h2', null, 'كل المراحل مكتملة'), h('p', null, `انتهت آخر مرحلة ${sp.list.map((x) => x.s.end_date).filter(Boolean).sort().pop() || ''}.`));
     } else if (cur) {
       const ip = cur.s.status === 'in_progress';
-      const crew = h('input', { type: 'number', min: 0, max: 500, inputmode: 'numeric', dir: 'ltr', placeholder: '0', value: cur.s.crew ?? '' , class: 'crew-in' });
+      const crew = h('input', { type: 'text', inputmode: 'numeric', maxlength: 4, dir: 'ltr', placeholder: '0', value: cur.s.crew ?? '', class: 'crew-in', autocomplete: 'off' });
       // اقتراح فرقة المرحلة السابقة
       const prevCrew = [...sp.list].reverse().find((x) => x.s.status === 'done' && x.s.crew_id)?.s.crew_id;
       const team = crewSelect(cur.s.crew_id || prevCrew || '');
@@ -168,7 +216,7 @@
       panel = h('section', { class: 'now-card ' + (ip ? 'ip' : 'ns') + (just?.start === cur.c.key ? ' just-start' : '') },
         h('span', { class: 'nc-tag' }, ip ? `المرحلة الحالية · ${num(cur.c.position)} من ${num(total)}` : `المرحلة التالية · ${num(cur.c.position)} من ${num(total)}`),
         h('h2', null, cur.c.name_ar),
-        ip ? h('p', null, (cur.s.start_date ? `بدأت ${sinceText(cur.s.start_date)} (${cur.s.start_date})` : 'جارية') + (crewName ? ` · ${crewName}` : '') + (cur.s.crew ? ` · ${num(cur.s.crew)} كادر` : ''))
+        ip ? h('p', null, cur.s.start_date ? ['بدأت ' + sinceText(cur.s.start_date) + ' (', ltr(cur.s.start_date), ')'] : 'جارية', (crewName ? ` · ${crewName}` : '') + (cur.s.crew ? ` · ${num(cur.s.crew)} كادر` : ''))
           : h('p', null, sp.done ? 'المرحلة السابقة اكتملت. ابدأ هذه عندما يبدأ العمل فعلاً.' : 'لم يبدأ العمل في المشروع بعد.'),
         staff ? (ip
           ? h('div', { class: 'nc-actions' },
@@ -178,20 +226,30 @@
               h('label', { class: 'crew-label' }, 'المنفّذ', team),
               h('label', { class: 'crew-label' }, 'عدد الكوادر', crew),
               h('button', { type: 'button', class: 'btn primary big', onClick: (e) => start(e.currentTarget, crew, team) }, '▶ ابدأ المرحلة'),
-              h('button', { type: 'button', class: 'btn ghost', onClick: async () => { await saveStage(p, cur.c.key, { status: 'na' }); A.render(); } }, 'لا تنطبق على هذا المشروع')))
+              h('button', { type: 'button', class: 'btn ghost', onClick: async () => {
+                if (!await confirmBox({ title: 'لا تنطبق؟', body: `ستُستثنى مرحلة "${cur.c.name_ar}" من حساب إنجاز المشروع. يمكنك إرجاعها من قائمة المراحل.`, okText: 'نعم، لا تنطبق' })) return;
+                const before = [snap(cur)];
+                if (await saveStage(p, cur.c.key, { status: 'na' })) toast(`"${cur.c.name_ar}" لا تنطبق`, 'ok', undoWith(before));
+                A.render();
+              } }, 'لا تنطبق على هذا المشروع')))
           : (R.nowCardPart(p, cur.c.key, cur.s.status) || h('p', { class: 'muted small' },
               S.profile?.crew_id ? 'هذه المرحلة غير مسندة لفرقتك. تحديثها للمدير والمشرف.' : 'تحديث المراحل للمدير والمشرف.')),
         staff ? R.nowCardPart(p, cur.c.key, cur.s.status) : null,
         ip && nextAfter(cur.c.key) ? h('p', { class: 'nc-next' }, `بعدها: ${nextAfter(cur.c.key).c.name_ar}`) : null);
+      // بعد بدء/إكمال مرحلة يُقفل الزر الجديد لحظة، حتى لا تُكمل الضغطة المزدوجة المرحلة التالية بالخطأ
+      if (just) panel.querySelectorAll('.nc-actions .btn').forEach((b) => { b.disabled = true; setTimeout(() => { b.disabled = false; }, 900); });
     }
 
     const steps = h('ol', { class: 'steps' }, sp.list.map(({ c, s }) => {
       const isCur = cur && cur.c.key === c.key;
-      const dates = s.status === 'done' ? `${s.start_date || '…'} ← ${s.end_date}` : s.status === 'in_progress' ? `منذ ${s.start_date}` : '';
+      const dates = s.status === 'done' ? [ltr(s.start_date || '…'), ' ← ', ltr(s.end_date)] : s.status === 'in_progress' ? ['منذ ', ltr(s.start_date)] : null;
       const inner = [
         h('span', { class: 'sp-dot' }, s.status === 'done' ? '✓' : s.status === 'na' ? '—' : num(c.position)),
         h('span', { class: 'sp-body' }, h('b', null, c.name_ar),
-          h('small', null, [dates, A.crewOf(s.crew_id)?.name || '', s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter(Boolean).join(' · ') || ' ')),
+          h('small', null, (() => {
+            const parts = [dates, A.crewOf(s.crew_id)?.name, s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter((x) => x && (!Array.isArray(x) || x.length));
+            return parts.length ? parts.flatMap((x, i) => (i ? [' · ', x] : [x])) : ' ';
+          })())),
         h('span', { class: 'sp-tags' }, R.stepBadge(p, c.key), h('span', { class: 'chip sp-st ' + ST_CLS[s.status] }, A.STAGE_AR[s.status]))
       ];
       return h('li', { class: `step ${ST_CLS[s.status]}${isCur ? ' cur' : ''}${just?.done === c.key ? ' just-done' : ''}${just?.start === c.key ? ' just-start' : ''}` },
@@ -214,26 +272,47 @@
   function assignDialog(p) {
     const sp = A.stageProgress(p);
     const open = sp.list.filter(({ s }) => s.status !== 'done' && s.status !== 'na');
-    const team = crewSelect('');
-    const boxes = open.map(({ c, s }) => h('label', { class: 'check as-row' }, h('input', { type: 'checkbox', value: c.key, checked: true }),
-      ` ${num(c.position)}. ${c.name_ar}`, h('small', { class: 'muted' }, s.crew_id ? ' (الحالي: ' + (A.crewOf(s.crew_id)?.name || '—') + ')' : '')));
-    const all = (v) => boxes.forEach((b) => { b.querySelector('input').checked = v; });
     if (!open.length) return toast('كل المراحل مكتملة أو لا تنطبق', 'error');
-    A.modal('إسناد مراحل', h('div', { class: 'stack sm' },
-      A.field('المنفّذ', team, { hint: 'اختر "بدون منفّذ" لإلغاء الإسناد' }),
-      h('div', { class: 'row' }, h('b', null, 'المراحل'), h('button', { type: 'button', class: 'btn ghost sm', onClick: () => all(true) }, 'الكل'), h('button', { type: 'button', class: 'btn ghost sm', onClick: () => all(false) }, 'لا شيء')),
-      h('div', { class: 'as-list' }, boxes)),
-    [{ label: 'إسناد', cls: 'primary', run: async () => {
-      const keys = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+    // لا اختيار افتراضي: "إسناد" معطّل حتى يُختار منفّذ، فلا يُمسح الإسناد بالخطأ
+    const team = crewSelect('');
+    team.firstChild.textContent = 'اختر الفرقة أو المقاول…';
+    team.firstChild.disabled = true; team.value = '';
+    // افتراضياً تُحدَّد المراحل التي لا منفّذ لها فقط (وإن لم توجد، كلها)
+    const unassigned = open.filter(({ s }) => !s.crew_id).length;
+    const boxes = open.map(({ c, s }) => h('label', { class: 'check as-row' }, h('input', { type: 'checkbox', value: c.key, checked: unassigned ? !s.crew_id : true, onChange: () => sync() }),
+      ` ${num(c.position)}. ${c.name_ar}`, h('small', { class: 'muted' }, s.crew_id ? ' (الحالي: ' + (A.crewOf(s.crew_id)?.name || '—') + ')' : ' (بدون منفّذ)')));
+    const picked = () => boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+    const all = (v) => { boxes.forEach((b) => { b.querySelector('input').checked = v; }); sync(); };
+    const save = async (crewId) => {
+      const keys = picked();
       if (!keys.length) { toast('اختر مرحلة واحدة على الأقل', 'error'); return false; }
       // نرسل الحالة الحالية مع المنفّذ حتى لا تتغيّر حالة أي مرحلة
-      const rows = keys.map((k) => ({ project_id: p.id, checkpoint: k, status: A.stageOf(p, k).status, crew_id: team.value || null }));
+      const rows = keys.map((k) => ({ project_id: p.id, checkpoint: k, status: A.stageOf(p, k).status, crew_id: crewId }));
       const r = await S.sb.from('project_stages').upsert(rows, { onConflict: 'project_id,checkpoint' }).select();
       if (r.error) { A.fail(r.error); return false; }
       r.data.forEach((x) => { (S.stages[p.id] ||= {})[x.checkpoint] = x; });
-      toast(team.value ? `أُسندت ${num(keys.length)} مرحلة إلى ${A.crewOf(team.value)?.name}` : 'أُلغي الإسناد');
+      toast(crewId ? `أُسندت ${A.cntAr(keys.length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} إلى ${A.crewOf(crewId)?.name}` : `أُزيل إسناد ${A.cntAr(keys.length, 'مرحلة واحدة', 'مرحلتين', 'مراحل', 'مرحلة')}`);
       A.render();
-    } }]);
+    };
+    A.modal('إسناد المراحل لفرقة أو مقاول', h('div', { class: 'stack sm' },
+      A.field('المنفّذ', team),
+      h('div', { class: 'row' }, h('b', null, 'المراحل'), h('button', { type: 'button', class: 'btn sm', onClick: () => all(true) }, 'تحديد الكل'), h('button', { type: 'button', class: 'btn sm', onClick: () => all(false) }, 'بدون تحديد')),
+      h('div', { class: 'as-list' }, boxes)),
+    [{ label: 'إزالة الإسناد من المحدد', cls: 'ghost danger-text', run: async () => {
+      if (!picked().length) { toast('اختر مرحلة واحدة على الأقل', 'error'); return false; }
+      if (!await confirmBox({ title: 'إزالة الإسناد', body: `ستصبح ${A.cntAr(picked().length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} بدون منفّذ.`, okText: 'إزالة الإسناد', danger: true })) return false;
+      return save(null);
+    } },
+    { label: 'إسناد', cls: 'primary', run: () => (team.value ? save(team.value) : (toast('اختر الفرقة أو المقاول أولاً', 'error'), false)) }]);
+    const dlg = document.getElementById('dialog');
+    const mainBtn = dlg.querySelector('.btn.primary');
+    function sync() {
+      const n = picked().length, c = A.crewOf(team.value);
+      mainBtn.disabled = !c || !n;
+      mainBtn.textContent = c && n ? `إسناد ${A.cntAr(n, 'مرحلة واحدة', 'مرحلتين', 'مراحل', 'مرحلة')} إلى ${c.name}` : 'إسناد';
+    }
+    team.addEventListener('change', sync);
+    sync();
   }
 
   // نسبة الإنجاز تنتقل من قيمتها السابقة إلى الجديدة بعد إكمال مرحلة
@@ -263,14 +342,14 @@
       } }, A.STAGE_AR[k])));
     const sd = h('input', { type: 'date', value: s.start_date || '', dir: 'ltr' });
     const ed = h('input', { type: 'date', value: s.end_date || '', dir: 'ltr' });
-    const crew = h('input', { type: 'number', min: 0, max: 500, inputmode: 'numeric', dir: 'ltr', value: s.crew ?? '' });
+    const crew = h('input', { type: 'text', inputmode: 'numeric', maxlength: 4, dir: 'ltr', value: s.crew ?? '', autocomplete: 'off' });
     const team = crewSelect(s.crew_id || '');
     const notes = h('textarea', { rows: 3, maxlength: 2000 }, s.notes || '');
     A.modal(`${num(c.position)}. ${c.name_ar}`, h('div', { class: 'stack sm' }, seg,
       h('div', { class: 'form-grid' }, A.field('تاريخ البدء', sd, { hint: 'يُملأ تلقائياً عند "جارية"' }), A.field('تاريخ الانتهاء', ed, { hint: 'يُملأ تلقائياً عند "مكتملة"' }),
         A.field('المنفّذ (فرقة أو مقاول)', team), A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }), R.stageHistory(p, c.key))),
     [{ label: 'حفظ', cls: 'primary', run: async () => {
-      const n = crew.value === '' ? null : Number(crew.value);
+      const n = toNum(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { toast('عدد الكوادر من 0 إلى 500', 'error'); return false; }
       if (sd.value && ed.value && ed.value < sd.value) { toast('تاريخ الانتهاء قبل تاريخ البدء', 'error'); return false; }
       const ok = await saveStage(p, c.key, { status, start_date: sd.value || null, end_date: ed.value || null, crew: n, crew_id: team.value || null, notes: notes.value.trim() || null });
@@ -298,7 +377,7 @@
         if (r.error || !r.data) return A.fail(r.error || 'permission denied');
         Object.assign(p, r.data); toast('تم حفظ بيانات المشروع'); A.render();
       } }, 'حفظ بيانات المشروع')),
-      A.isAdmin() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn danger sm', onClick: del }, 'حذف المشروع')) : null);
+      A.isAdmin() ? h('div', { class: 'danger-zone' }, h('b', null, 'منطقة الخطر'), h('p', { class: 'muted small' }, 'حذف المشروع يحذف مراحله وكل بياناته نهائياً، ولا يمكن التراجع.'), h('button', { type: 'button', class: 'btn danger-outline sm', onClick: del }, 'حذف المشروع')) : null);
   }
 
   // أزرار المشروع: صف على الكمبيوتر، وقائمة "المزيد" على الجوال
@@ -333,7 +412,7 @@
       P[k].forEach((d) => { const path = document.createElementNS(NS, 'path'); path.setAttribute('d', d); svg.appendChild(path); });
       return svg;
     };
-    const short = { dashboard: 'اللوحة', tracker: `${W.theMany}`, tests: 'الفحوصات', ncr: 'NCR', guide: 'المساعدة' };
+    const short = { dashboard: 'الملخّص', tracker: `${W.theMany}`, tests: 'الفحوصات', ncr: 'المخالفات', guide: 'المساعدة' };
     const d = S.data[p.id];
     const open = d ? d.ncrs.filter((n) => n.status === 'open').length : 0;
     return h('nav', { class: 'bottom-nav', 'aria-label': 'التنقل' }, SHEETS.map(([k, ar]) =>
@@ -394,7 +473,7 @@
       ].map(([l, v, c, st]) => h('div', { class: 'st ' + c },
         h('button', { type: 'button', class: 'st-btn', title: st === 'ncr' ? 'عرض NCR المفتوحة' : `عرض ${W.theMany}: ${l}`, onClick: () => {
           if (st === 'ncr') { S._nf = { status: 'open' }; A.go(`project/${p.id}/ncr`); return; }
-          S._tf = { q: '', zone: '', crew: '', status: st, next: '', sort: 'code' };
+          (S._tfBy ||= {})[p.id] = { q: '', zone: '', crew: '', status: st, next: '', sort: 'code' };
           A.go(`project/${p.id}/tracker`);
         } }, h('dd', null, num(v)), h('dt', null, l, h('span', { class: 'st-go', 'aria-hidden': 'true' }, ' ←')))))),
       h('div', { class: 'd2-grid' },
@@ -407,7 +486,7 @@
             h('div', { class: 'ramp', 'aria-hidden': 'true' }, BANDS.map(([c]) => h('i', { class: 'tile ' + c }))),
             h('div', { class: 'ramp-labels' }, h('span', null, 'لم تبدأ'), h('span', null, 'مكتملة')),
             h('div', { class: 'flags' },
-              h('span', null, h('i', { class: 'tile b1 flag-fail' }), 'بند فاشل أو NCR مفتوحة'),
+              h('span', null, h('i', { class: 'tile b1 flag-fail' }), 'فحص فاشل أو عدم مطابقة مفتوحة'),
               h('span', null, h('i', { class: 'tile b1 flag-alert' }), 'تنبيه تسلسل')))),
         h('aside', { class: 'd2-side' },
           h('section', { class: 'd2-attn' + (attn.length ? ' has' : '') },
@@ -447,7 +526,7 @@
       .sort((a, b) => (a.g === 'غير محددة') - (b.g === 'غير محددة') || String(a.g).localeCompare(String(b.g), 'ar', { numeric: true }));
     return h('section', { class: 'd2-group' }, h('h2', null, title),
       h('ul', { class: 'brand-list grp-list' }, list.map((x) => h('li', null, h('div', { class: 'grp-row' },
-        h('b', { dir: 'auto' }, x.g), h('small', null, `${num(x.n)} ${W.one}، مكتملة ${num(x.done)}`),
+        h('b', { dir: 'auto' }, x.g), h('small', null, `${A.unitCount(W, x.n)}، المكتمل ${num(x.done)}`),
         h('span', { class: 'st-bar' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })), h('span', { class: 'bp' }, A.pctText(x.pct)),
         x.fail || x.alert ? h('span', { class: 'grp-flags' }, x.fail ? h('span', { class: 'chip st-has-failure' }, `${x.fail} فيها فشل`) : null, x.alert ? h('span', { class: 'chip alert' }, `${x.alert} تنبيه`) : null) : null)))));
   }
@@ -457,7 +536,8 @@
      ========================================================== */
   function sheetTracker(p, d) {
     const cps = S.checkpoints;
-    const f = S._tf || (S._tf = { q: '', zone: '', crew: '', status: '', next: '', sort: mobile() ? 'priority' : 'code' });
+    // التصفية لكل مجمّع على حدة (لا تنتقل من مجمّع لآخر)
+    const f = (S._tfBy ||= {})[p.id] || (S._tfBy[p.id] = { q: '', zone: '', crew: '', status: '', next: '', sort: mobile() ? 'priority' : 'code' });
     // الأولوية: مشكلة ← جارية ← لم تبدأ ← مكتملة
     const rank = (k) => (k.R || k.W || k.T ? 0 : k.U === 'In progress' ? 1 : k.U === 'Not started' ? 2 : 3);
     const zones = [...new Set(d.units.map((u) => u.zone).filter(Boolean))].sort();
@@ -508,11 +588,11 @@
     const cps = S.checkpoints;
     const staff = A.isStaff();
     return h('div', { class: 'xl-wrap' }, h('table', { class: 'xl tracker' },
+      // أسماء المراحل عمودية وأعمدتها ضيقة حتى تظهر المراحل الـ13 كلها بلا تمرير أفقي؛ رقم ITP في التلميح
       h('thead', null,
-        h('tr', { class: 'itp' }, h('th', { class: 'stk' }), h('th'), h('th'), cps.map((c) => h('th', { dir: 'ltr' }, c.itp_ref)), h('th', { colspan: 8 })),
         h('tr', null,
           h('th', { class: 'stk' }, `${W.the}`), h('th', null, 'المنطقة'), h('th', null, 'الفرقة'),
-          cps.map((c) => h('th', { class: 'cp', title: c.name_en }, c.name_ar)),
+          cps.map((c) => h('th', { class: 'cp', title: `${c.name_ar} · ${c.name_en} · ${c.itp_ref}`, scope: 'col' }, h('span', { class: 'cp-v' }, c.name_ar))),
           h('th', { class: 'f' }, 'ناجح'), h('th', { class: 'f' }, 'فاشل'), h('th', { class: 'f' }, 'الإنجاز'), h('th', { class: 'f' }, 'NCR'),
           h('th', { class: 'f' }, 'الحالة'), h('th', { class: 'f' }, 'الخطوة التالية'), h('th', { class: 'f' }, 'تنبيه'), h('th', null, 'ملاحظات'))),
       h('tbody', null, list.map(({ u, k }) => {
@@ -541,7 +621,7 @@
   function villaCards(p, list) {
     let lastGroup = null;
     const groupName = (k) => (k.R || k.W || k.T ? 'تحتاج انتباهاً' : k.U === 'In progress' ? 'جارية' : k.U === 'Not started' ? 'لم تبدأ' : 'مكتملة');
-    const sorted = (S._tf || {}).sort === 'priority';
+    const sorted = ((S._tfBy || {})[p.id] || {}).sort === 'priority';
     const out = [];
     list.forEach(({ u, k }) => {
       const g = groupName(k);
@@ -633,7 +713,9 @@
         h('div', { class: 'quick-btns' },
           h('button', { type: 'button', class: 'btn big pass', onClick: async () => { if (await saveResult(u, k.V, 'pass')) { toast(`${u.code} · ${k.V.name_ar}: ناجح`); A.render(); } } }, '✓ ناجح'),
           h('button', { type: 'button', class: 'btn big fail', onClick: async () => { if (await saveResult(u, k.V, 'fail')) { toast(`${u.code} · ${k.V.name_ar}: فاشل. أضف NCR`, 'error'); A.render(); } } }, '✗ فاشل'))) : null,
-      h('section', { class: 'panel' }, h('h2', null, 'نقاط الفحص'),
+      // الفني: القراءات أولاً (هي عمله)، ونقاط الفحص مطوية؛ المشرف: نقاط الفحص أولاً
+      ...(() => {
+        const cpsSec = h('section', { class: 'panel' }, h('h2', null, 'نقاط الفحص'),
         (() => {
           const row = (cp) => {
             const v = r(cp.key);
@@ -654,15 +736,20 @@
               h('ol', { class: 'cp-list' }, done.map(row))) : null,
             h('ol', { class: 'cp-list' }, rest.map(row))
           ];
-        })()),
-      h('section', { class: 'panel' },
+        })());
+        const rdSec = h('section', { class: 'panel' },
         h('div', { class: 'row between' }, h('h2', null, 'القراءات'), h('button', { type: 'button', class: 'btn sm primary', onClick: () => testForm(p, d, u) }, blank(t.unit_id) ? 'تسجيل قراءات' : 'تعديل القراءات')),
         blank(t.unit_id) ? h('p', { class: 'muted' }, 'لا توجد قراءات بعد.') : h('div', { class: 'rds' },
           reading('هبوط الضغط MPa', c.H, c.I), reading('الفاكيوم (مايكرون)', t.vacuum_microns, c.N),
-          reading('فرق الشحن', c.R === '' ? '' : A.pctText(c.R), c.S), reading('الفاحص', t.inspector))),
+          reading('فرق الشحن', c.R === '' ? '' : A.pctText(c.R), c.S), reading('الفاحص', t.inspector)));
+        if (staff) return [cpsSec, rdSec];
+        const passN = cps.filter((cp) => r(cp.key) === 'pass').length, openN = cps.filter((cp) => r(cp.key) === 'pending').length;
+        return [rdSec, h('p', { class: 'muted small tech-note' }, 'اعتماد النتائج للمشرف. سجّل القراءات وسيراجعها.'),
+          h('details', { class: 'panel tech-cps' }, h('summary', null, `نقاط الفحص: ${num(passN)} ناجحة، ${num(openN)} لم تُفحص`), cpsSec)];
+      })(),
       h('section', { class: 'panel' },
         h('div', { class: 'row between' }, h('h2', null, `عدم المطابقة (${ncrs.length})`),
-          staff ? h('button', { type: 'button', class: 'btn sm', onClick: () => ncrForm(p, d, null, u, k.V === '-' ? null : k.V.key) }, '+ NCR') : null),
+          staff ? h('button', { type: 'button', class: 'btn sm', onClick: () => ncrForm(p, d, null, u, k.V === '-' ? null : k.V.key) }, '+ عدم مطابقة') : null),
         ncrs.length ? h('ul', { class: 'ncr-mini' }, ncrs.map((n) => h('li', null,
           h('span', { class: 'chip ' + (n.status === 'open' ? 'st-has-failure' : 'st-complete') }, n.status === 'open' ? 'مفتوحة' : 'مغلقة'),
           h('b', null, n.ncr_no), ' ', S.checkpoints.find((x) => x.key === n.checkpoint)?.name_ar, ': ', n.description,
@@ -751,7 +838,8 @@
     const t = d.tests.get(u.id) || {};
     const el = {};
     for (const [k, [, kind]] of Object.entries(T_FIELDS)) {
-      el[k] = h('input', { type: kind === 'num' ? 'number' : kind === 'date' ? 'date' : 'text', step: 'any', dir: 'ltr', inputmode: kind === 'num' ? 'decimal' : null, value: t[k] ?? '', maxlength: kind === 'text' ? 120 : null });
+      // نص بلوحة أرقام بدل type=number: حتى تُقبل الأرقام العربية والفاصلة ولا تُرفض بصمت
+      el[k] = h('input', { type: kind === 'date' ? 'date' : 'text', dir: 'ltr', inputmode: kind === 'num' ? 'decimal' : null, autocomplete: 'off', value: t[k] ?? '', maxlength: kind === 'text' ? 120 : kind === 'num' ? 20 : null });
     }
     if (!t.unit_id && !el.inspector.value) el.inspector.value = S.profile.full_name || '';
     const grp = (title, keys) => h('fieldset', { class: 'grp' }, h('legend', null, title), h('div', { class: 'form-grid' }, keys.map((k) => A.field(T_FIELDS[k][0], el[k]))));
@@ -765,8 +853,9 @@
       for (const [k, [, kind]] of Object.entries(T_FIELDS)) {
         const v = el[k].value.trim();
         if (kind === 'num') {
-          if (v !== '' && !Number.isFinite(Number(v))) { toast(`قيمة غير صحيحة: ${T_FIELDS[k][0]}`, 'error'); return false; }
-          row[k] = v === '' ? null : Number(v);
+          const n = toNum(v);
+          if (Number.isNaN(n)) { toast(`قيمة غير صحيحة: ${T_FIELDS[k][0]} (اكتب رقماً مثل 3.99)`, 'error'); el[k].focus(); return false; }
+          row[k] = n;
         } else row[k] = v || null;
       }
       const r = await S.sb.from('test_records').upsert(row, { onConflict: 'unit_id' }).select().single();
@@ -801,9 +890,11 @@
       if (!(v >= 0) || e.target.value === '') { e.target.value = p[key]; return toast('قيمة غير صحيحة', 'error'); }
       const r = await S.sb.from('projects').update({ [key]: v }).eq('id', p.id).select().maybeSingle();
       if (r.error || !r.data) { e.target.value = p[key]; return A.fail(r.error || 'permission denied'); }
-      Object.assign(p, r.data); draw(); summary.textContent = limText(); toast('تم تحديث الحد');
+      Object.assign(p, r.data); draw(); UI.append(clear(summary), limText()); toast('تم تحديث الحد');
     } }));
-    const limText = () => `حدود القبول: هبوط الضغط ≤ ${p.lim_pressure_drop} MPa · الفاكيوم ≤ ${p.lim_vacuum_max} مايكرون · الثبات ≥ ${p.lim_vacuum_hold} دقيقة · الارتفاع ≤ 50 · الشحن ±${Math.round(p.lim_charge_tol * 1000) / 10}%`;
+    // بالكلمات بدل ≤ و≥ لأنها تنقلب في النص العربي فيُفهم الحد بالعكس
+    const limText = () => ['حدود القبول: هبوط الضغط لا يزيد على ', ltr(p.lim_pressure_drop + ' MPa'), ' · الفاكيوم لا يزيد على ', ltr(p.lim_vacuum_max), ' مايكرون · الثبات لا يقل عن ',
+      ltr(p.lim_vacuum_hold), ' دقيقة · ارتفاع الفاكيوم لا يزيد على ', ltr(50), ' · الشحن ضمن ', ltr('±' + Math.round(p.lim_charge_tol * 1000) / 10 + '%')];
     const summary = h('span', null, limText());
     draw();
     return h('div', { class: 'stack' },
@@ -856,7 +947,7 @@
   function ncrForm(p, d, n, presetUnit, presetCp) {
     const cps = S.checkpoints;
     const el = {
-      no: h('input', { value: n?.ncr_no || 'NCR-' + String(d.ncrs.length + 1).padStart(3, '0'), maxlength: 40, dir: 'ltr' }),
+      no: h('input', { value: n?.ncr_no || nextNcrNo(d.ncrs.map((x) => x.ncr_no)), maxlength: 40, dir: 'ltr' }),
       date: h('input', { type: 'date', dir: 'ltr', value: n?.date_raised || today() }),
       villa: h('select', null, d.units.map((u) => h('option', { value: u.id, selected: u.id === (n?.unit_id || presetUnit?.id) }, u.code))),
       cp: h('select', null, cps.map((c) => h('option', { value: c.key, selected: c.key === (n?.checkpoint || presetCp) }, c.name_ar))),
@@ -921,7 +1012,7 @@
           h('option', { value: 'closed', selected: f.status === 'closed' }, `المغلقة (${d.ncrs.length - open})`),
           h('option', { value: '', selected: !f.status }, `الكل (${d.ncrs.length})`)),
         overdue ? h('span', { class: 'chip st-has-failure' }, `${overdue} متأخرة عن موعدها`) : null,
-        staff && d.units.length ? h('button', { type: 'button', class: 'btn primary sm', onClick: () => ncrForm(p, d, null) }, '+ NCR جديدة') : null),
+        staff && d.units.length ? h('button', { type: 'button', class: 'btn primary sm', onClick: () => ncrForm(p, d, null) }, '+ حالة عدم مطابقة') : null),
       h('p', { class: 'muted small' }, `سطر لكل فشل. "مفتوحة" تُحسب على ${W.the} في متابعة ${W.theMany}. أغلقها فقط بعد إعادة الفحص والتأكد من الإصلاح.` + (staff ? ' اضغط أي سطر لتعديله.' : '')),
       h('div', { class: 'xl-wrap' }, h('table', { class: 'xl ncr' },
         h('thead', null, h('tr', null, ['الرقم', 'تاريخ الفتح', `${W.the}`, 'نقطة الفحص', 'الوصف', 'المسؤول', 'الموعد', 'الحالة', 'تاريخ الإغلاق'].map((x) => h('th', null, x)))),
@@ -938,13 +1029,6 @@
       if (r.error) return A.fail(r.error);
       S.projects = S.projects.filter((x) => x.id !== p.id); delete S.data[p.id];
       S._stayHome = true; A.go('home');
-    };
-    const rename = async (e) => {
-      const v = e.target.value.trim();
-      if (!v) { e.target.value = p.client; return; }
-      const r = await S.sb.from('projects').update({ client: v }).eq('id', p.id).select().maybeSingle();
-      if (r.error || !r.data) return A.fail(r.error || 'permission denied');
-      Object.assign(p, r.data); toast('تم تغيير الاسم');
     };
     return h('div', { class: 'stack guide' },
       h('p', null, `سطر واحد لكل ${W.one}. تحدّثه بعد كل فحص، ولوحة التحكم والتنبيهات تتحدث وحدها.`),
@@ -978,7 +1062,7 @@
             Object.assign(p, r.data); toast('تم حفظ بيانات المشروع'); A.render();
           } }, 'حفظ بيانات المشروع')));
         })(),
-        A.isAdmin() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn danger sm', onClick: del }, 'حذف المشروع')) : null) : null);
+        A.isAdmin() ? h('div', { class: 'danger-zone' }, h('b', null, 'منطقة الخطر'), h('p', { class: 'muted small' }, 'حذف المشروع يحذف مراحله وكل بياناته نهائياً، ولا يمكن التراجع.'), h('button', { type: 'button', class: 'btn danger-outline sm', onClick: del }, 'حذف المشروع')) : null) : null);
   }
 
   /* ==========================================================
@@ -1079,7 +1163,8 @@
           validations: [{ sqref: `H6:H${NL}`, list: '"Open,Closed"' }, { sqref: `C6:C${NL}`, list: `${VT}!$A$5:$A$${L}` }, { sqref: `D6:D${NL}`, list: `${VT}!$D$4:$P$4` }],
           cf: [{ sqref: `H6:H${NL}`, rules: [{ formula: '"Open"', dxf: 1 }, { formula: '"Closed"', dxf: 0 }] }] } }
       ]);
-      A.download(blob, `${p.client.replace(/[\\/:*?"<>|]/g, ' ').slice(0, 60)} - VRF_QC_Tracker - ${today()}.xlsx`);
+      // اسم إنجليزي: بعض المتصفحات تتجاهل الأسماء العربية فينزل الملف باسم "download" بلا امتداد
+      A.download(blob, `VRF_QC_Tracker-${today()}.xlsx`);
       toast('تم تنزيل ملف Excel');
     } catch (e) { A.fail(e); }
   }
@@ -1243,7 +1328,7 @@
       for (const t of tests) {
         const u = byCode.get(t.code);
         if (!u) { errors.push(t.code + `: ${W.the} غير موجودة (Test Records)`); continue; }
-        const { code, ...row } = t;
+        const { code: _code, ...row } = t;
         const r = await S.sb.from('test_records').upsert({ ...row, unit_id: u.id }, { onConflict: 'unit_id' });
         if (r.error) errors.push(t.code + ': ' + A.errText(r.error)); else tDone++;
       }
@@ -1252,16 +1337,23 @@
         if (!r.error && r.data) Object.assign(p, r.data);
       }
       let nDone = 0;
+      // NCR الموجودة برقمها تُحدَّث بدل تكرارها عند إعادة استيراد نفس الملف
+      const curNcrs = (await S.sb.from('ncrs').select('id, ncr_no').eq('project_id', p.id)).data || [];
+      const byNo = new Map(curNcrs.map((n) => [n.ncr_no, n.id]));
       for (const x of ncrs) {
         const u = byCode.get(x.code);
         if (!u) { errors.push(x.code + `: ${W.the} غير موجودة (NCR)`); continue; }
-        const { code, ...row } = x;
-        const r = await S.sb.from('ncrs').insert({ ...row, ncr_no: row.ncr_no || 'NCR-' + String(nDone + 1).padStart(3, '0'), project_id: p.id, unit_id: u.id });
+        const { code: _code, ...row } = x;
+        const no = row.ncr_no || nextNcrNo([...byNo.keys()]);
+        const r = byNo.has(no)
+          ? await S.sb.from('ncrs').update({ ...row, ncr_no: no, unit_id: u.id }).eq('id', byNo.get(no))
+          : await S.sb.from('ncrs').insert({ ...row, ncr_no: no, project_id: p.id, unit_id: u.id }).select('id').single();
+        if (!r.error && !byNo.has(no)) byNo.set(no, r.data?.id);
         if (r.error) errors.push((x.ncr_no || x.code) + ': ' + A.errText(r.error)); else nDone++;
       }
       await A.loadProject(p.id, true); A.loadCrewUnits();
-      clear(out).append(h('p', { class: 'ok-text' }, `✓ تم: ${units.length} ${W.one}، ${done} نتيجة، ${tDone} سطر قراءات، ${nDone} NCR.`),
-        errors.length ? h('div', { class: 'err' }, h('b', null, `${errors.length} خطأ:`), h('ul', null, errors.slice(0, 30).map((e) => h('li', null, e)))) : null);
+      UI.append(clear(out), [h('p', { class: 'ok-text' }, `✓ تم: ${A.unitCount(p, units.length)}، ونتائج ${num(done)}، وقراءات ${num(tDone)}، وحالات عدم مطابقة ${num(nDone)}.`),
+        errors.length ? h('div', { class: 'err' }, h('b', null, `${errors.length} خطأ:`), h('ul', null, errors.slice(0, 30).map((e) => h('li', null, e)))) : null]);
       A.modal('اكتمل الاستيراد', out, [{ label: 'عرض Villa Tracker', cls: 'primary', run: () => { A.go(`project/${p.id}/tracker`); A.render(); } }]);
     } catch (e) {
       A.fail(e);
