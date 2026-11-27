@@ -45,7 +45,7 @@ const people = [
 const TABLES = {
   projects, qc_checkpoints: checkpoints, project_stages: stages, unit_overview: units, units, test_records: tests, ncrs,
   crews: [{ id: ids.crew, name: 'فرقة أحمد', kind: 'internal', active: true, governorates: ['بغداد'], created_at: day(-60) }],
-  crew_unit_stats: [{ crew_id: ids.crew, project_id: ids.p2, units: 3, complete: 1, in_progress: 0, failed: 1 }],
+  crew_unit_stats: [{ crew_id: ids.crew, project_id: ids.p2, units: 3, done: 1, in_progress: 0, failing: 1 }],
   stage_requests: [{ id: '50000000-0000-0000-0000-000000000001', project_id: ids.p1, checkpoint: 'equipment_set', action: 'start', status: 'pending',
     requested_by: ids.tech, requested_at: day(-1) }],
   unit_checks: [], audit_log: [{ id: 1, at: day(-1), actor: ids.admin, table_name: 'projects', action: 'UPDATE', new_data: { client: 'بيت الاختبار' } }],
