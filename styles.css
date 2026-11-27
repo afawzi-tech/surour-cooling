@@ -1099,7 +1099,7 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 .nl-short { display: none; }
 @media (max-width: 760px) {
   .mbar > a:has(.nl-short) .nl-full { display: none; }
-  .mbar .nl-short { display: inline; }
+  .mbar > a .nl-short { display: inline; }
   .pl-row.late .c-due small { display: none; }
   .pl-row .c-cust small { padding-inline-start: 8px; }
 }
@@ -1202,3 +1202,11 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 .tp-table tr.tp-fail td { background: var(--fail-bg); }
 @media (max-width: 640px) { .tp-card .perf { grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 8px; } }
 .tp-code { white-space: nowrap; }
+
+/* بطاقة تنبيه عامة (مثل: لا توجد نسخة احتياطية حديثة) */
+.card.warn { border-inline-start: 4px solid var(--doing); }
+.card.warn h2 { color: var(--doing); }
+.bk-list { list-style: none; margin: 0; padding: 0; }
+.bk-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.bk-list li:last-child { border-bottom: 0; }
+.bk-list li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
