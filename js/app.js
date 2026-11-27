@@ -914,6 +914,47 @@
   };
 
   /* ---------- المستخدمون ---------- */
+  // الإنشاء عبر دالة على خادم Supabase (admin-create-user) تتحقق أن الطالب مدير.
+  // مفتاح service_role يبقى على الخادم ولا يصل للواجهة.
+  function newUser() {
+    const name = h('input', { maxlength: 120, autocomplete: 'off' });
+    const email = h('input', { type: 'email', dir: 'ltr', maxlength: 200, autocomplete: 'off', inputmode: 'email' });
+    const pass = h('input', { type: 'text', dir: 'ltr', maxlength: 72, autocomplete: 'new-password', spellcheck: 'false' });
+    const roleSel = h('select', null, Object.entries(ROLES).map(([v, l]) => h('option', { value: v, selected: v === 'technician' }, l)));
+    const gen = () => {
+      const abc = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ', dig = '23456789';
+      const r = new Uint32Array(10); crypto.getRandomValues(r);
+      pass.value = Array.from(r, (x, i) => (i % 3 === 2 ? dig : abc)[x % (i % 3 === 2 ? dig.length : abc.length)]).join('');
+    };
+    gen();
+    modal('مستخدم جديد', h('div', { class: 'form-grid' },
+      field('الاسم', name, { wide: true }), field('البريد الإلكتروني', email, { wide: true }),
+      field('كلمة المرور', pass, { hint: '8 أحرف على الأقل، فيها أرقام وحروف' }),
+      h('div', { class: 'field' }, h('label', null, '\u00a0'), h('button', { type: 'button', class: 'btn', onClick: gen }, 'كلمة مرور جديدة')),
+      field('الدور', roleSel, { wide: true, hint: 'الفني يشاهد ويسجّل قراءات الفحص فقط' })),
+    [{ label: 'إنشاء الحساب', cls: 'primary', run: async () => {
+      const v = { full_name: name.value.trim(), email: email.value.trim().toLowerCase(), password: pass.value, role: roleSel.value };
+      if (!v.full_name) { toast('اكتب الاسم', 'error'); return false; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.email)) { toast('البريد الإلكتروني غير صحيح', 'error'); return false; }
+      if (v.password.length < 8 || !/[0-9]/.test(v.password) || !/[^0-9]/.test(v.password)) { toast('كلمة المرور 8 أحرف على الأقل، وفيها أرقام وحروف', 'error'); return false; }
+      const { data, error } = await state.sb.functions.invoke('admin-create-user', { body: v });
+      if (error) {
+        let msg = '';
+        try { msg = (await error.context.json()).error; } catch (e) { /* */ }
+        toast(msg || errText(error), 'error'); return false;
+      }
+      // بطاقة الدخول تظهر مرة واحدة لترسلها للشخص
+      const text = `حسابك في تطبيق متابعة مشاريع سرور\nالرابط: ${location.origin}${location.pathname}\nالبريد: ${v.email}\nكلمة المرور: ${v.password}`;
+      setTimeout(() => modal('تم إنشاء الحساب', h('div', { class: 'stack sm' },
+        h('p', null, `أُنشئ حساب ${v.full_name} بدور ${ROLES[v.role]}. أرسل له بيانات الدخول برسالة خاصة:`),
+        h('pre', { class: 'cred', dir: 'rtl' }, text),
+        h('p', { class: 'muted small' }, 'لن تظهر كلمة المرور مرة أخرى. لا تنشرها في مجموعة عامة.')),
+      [{ label: 'نسخ', cls: 'primary', run: async () => { try { await navigator.clipboard.writeText(text); toast('تم النسخ'); } catch (e) { toast('انسخ النص يدوياً', 'error'); } return false; } },
+       { label: 'واتساب', run: () => { window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener'); return false; } }]), 0);
+      render();
+    } }]);
+  }
+
   views.users = {
     title: 'المستخدمون', allow: isAdmin,
     async render() {
@@ -926,8 +967,9 @@
         if (u.id === state.user.id) Object.assign(state.profile, r.data);
         toast('تم الحفظ');
       };
-      return h('div', { class: 'stack' }, h('h1', null, 'المستخدمون'),
-        h('section', { class: 'card note' }, h('p', null, 'إضافة مستخدم: من لوحة Supabase ← Authentication ← Users ← Add user (فعّل Auto Confirm User). يظهر هنا بدور "فني"، فغيّر دوره من الجدول.')),
+      return h('div', { class: 'stack' },
+        h('div', { class: 'row between' }, h('h1', null, 'المستخدمون'), h('button', { type: 'button', class: 'btn primary', onClick: newUser }, '+ مستخدم جديد')),
+        h('p', { class: 'muted' }, 'غيّر الاسم أو الدور من الجدول ويُحفظ وحده. لإيقاف شخص ترك العمل، أزل علامة "مفعّل" بدل الحذف حتى تبقى سجلاته.'),
         h('section', { class: 'card' }, h('div', { class: 'table-wrap' }, h('table', { class: 'table' },
           h('thead', null, h('tr', null, h('th', null, 'الاسم'), h('th', null, 'الدور'), h('th', null, 'مفعّل'), h('th', null, 'أُضيف'))),
           h('tbody', null, data.map((u) => {
@@ -942,11 +984,13 @@
         h('section', { class: 'card' }, h('h2', null, 'الصلاحيات'), h('div', { class: 'table-wrap' }, h('table', { class: 'table compact' },
           h('thead', null, h('tr', null, h('th', null, ''), h('th', null, 'مدير'), h('th', null, 'مشرف'), h('th', null, 'فني'))),
           h('tbody', null, [
-            ['عرض كل الأوراق', 1, 1, 1],
-            ['تسجيل القراءات في Test Records', 1, 1, 1],
-            ['تغيير النتائج في Villa Tracker', 1, 1, 0],
-            ['NCR Register، والفلل، والحدود الصفراء، واستيراد/تصدير Excel', 1, 1, 0],
-            ['حذف المشاريع والفلل، والمستخدمون، وسجل العمليات', 1, 0, 0]
+            ['عرض كل المشاريع والمراحل والفرق وبيانات العملاء', 1, 1, 1],
+            ['تسجيل قراءات الفحص في المجمّعات', 1, 1, 1],
+            ['إنشاء المشاريع وتعديل بياناتها ومواعيدها', 1, 1, 0],
+            ['بدء المراحل وإكمالها وإسنادها لفرقة أو مقاول', 1, 1, 0],
+            ['إضافة الفرق والمقاولين وتعديلهم', 1, 1, 0],
+            ['نتائج فحص الفلل، وNCR، واستيراد Excel، والنسخة الاحتياطية', 1, 1, 0],
+            ['حذف المشاريع والفرق، وإضافة المستخدمين، وسجل العمليات', 1, 0, 0]
           ].map(([a, ...c]) => h('tr', null, h('td', null, a), c.map((x) => h('td', { class: x ? 'yes' : 'no' }, x ? '✓' : '—')))))))));
     }
   };

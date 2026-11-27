@@ -971,3 +971,4 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 .steps-wrap .row.between h2 { margin: 0; }
 :root[data-theme="dark"] .kind2 button.on { background: #173A55; color: #8FD0F0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kind2 button.on { background: #173A55; color: #8FD0F0; } }
+.cred { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--f-body); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; user-select: all; }
