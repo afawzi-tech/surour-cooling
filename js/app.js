@@ -188,6 +188,8 @@
      متأخر عن الجدول: الإنجاز أقل من نسبة الوقت المنقضي (من البدء إلى التسليم) بـ15 نقطة أو أكثر. */
   const BEHIND_GAP = 0.15;
   // التاريخ المحلي للجهاز (بغداد UTC+3)، لا UTC، حتى لا يصير "اليوم" أمس بعد منتصف الليل
+  // روابط الخرائط المسموحة فقط (نفس شرط الخادم في schema.sql)
+  const MAP_URL = /^https:\/\/((www\.)?google\.[a-z.]{2,8}\/maps|maps\.google\.[a-z.]{2,8}|maps\.app\.goo\.gl|goo\.gl\/maps|(www\.|ul\.)?waze\.com|maps\.apple\.com)([/?#][^\s<>"]*)?$/i;
   const todayStr = () => new Date().toLocaleDateString('en-CA');
   const dayDiff = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);
   function schedule(p, pct, status) {
@@ -1145,7 +1147,7 @@
       const v = values();
       if (!v.client) return 'اكتب اسم المشروع';
       if (v.customer_phone && !/^[0-9+ ()-]{4,30}$/.test(v.customer_phone)) return 'رقم الهاتف أرقام فقط';
-      if (v.map_url && !/^https:\/\/[^\s<>"]+$/.test(v.map_url)) return 'رابط الخريطة يجب أن يبدأ بـ https://';
+      if (v.map_url && !MAP_URL.test(v.map_url)) return 'الصق رابط موقع من خرائط Google أو Waze (يبدأ بـ https://)';
       if (v.start_date && v.due_date && v.due_date < v.start_date) return 'تاريخ التسليم قبل تاريخ البدء';
       return '';
     };
@@ -1428,10 +1430,12 @@
       const quick = async (btn) => {
         btn.disabled = true;
         try {
-          const all = (t) => fetchAll((a, b) => state.sb.from(t).select('*').range(a, b));
-          const [units, checks, tests, ncrs, stages, crews] = await Promise.all([all('units'), all('unit_checks'), all('test_records'), all('ncrs'), all('project_stages'), all('crews')]);
+          // ترتيب ثابت بالمفتاح الأساسي حتى لا تُفوَّت أسطر أو تتكرر بين الدفعات، والمشاريع تُجلب الآن لا من الذاكرة
+          const all = (t, ...keys) => fetchAll((a, b) => keys.reduce((q, k) => q.order(k), state.sb.from(t).select('*')).range(a, b));
+          const [projects, units, checks, tests, ncrs, stages, crews, materials] = await Promise.all([all('projects', 'id'), all('units', 'id'), all('unit_checks', 'unit_id', 'checkpoint'),
+            all('test_records', 'unit_id'), all('ncrs', 'id'), all('project_stages', 'project_id', 'checkpoint'), all('crews', 'id'), all('materials', 'id')]);
           save({ app: 'surour-vrf-qc', version: 4, exported_at: new Date().toISOString(),
-            projects: state.projects, project_stages: stages, crews, units, unit_checks: checks, test_records: tests, ncrs }, `surour-backup-${stamp()}.json`);
+            projects, project_stages: stages, crews, units, unit_checks: checks, test_records: tests, ncrs, materials }, `surour-backup-${stamp()}.json`);
           toast('تم التنزيل');
         } catch (e) { fail(e); }
         btn.disabled = false;
@@ -1484,7 +1488,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, MAP_URL, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));

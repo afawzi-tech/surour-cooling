@@ -5,6 +5,8 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-0000000000b2', 'sup@x.iq'),
   ('00000000-0000-0000-0000-0000000000c3', 'tech@x.iq'),
   ('00000000-0000-0000-0000-0000000000d4', 'off@x.iq');
+-- الحسابات الجديدة تبدأ غير مفعّلة؛ المدير يفعّلها
+update public.profiles set active = true where id <> '00000000-0000-0000-0000-0000000000d4';
 update public.profiles set role = 'admin'      where id = '00000000-0000-0000-0000-0000000000a1';
 update public.profiles set role = 'supervisor' where id = '00000000-0000-0000-0000-0000000000b2';
 update public.profiles set active = false      where id = '00000000-0000-0000-0000-0000000000d4';

@@ -36,8 +36,9 @@ create table if not exists public.profiles (
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, full_name)
-  values (new.id, coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1)))
+  -- الحساب الجديد غير مفعّل حتى يفعّله المدير (احتياطاً لو فُتح التسجيل الذاتي بالخطأ)
+  insert into public.profiles (id, full_name, active)
+  values (new.id, coalesce(new.raw_user_meta_data ->> 'full_name', split_part(new.email, '@', 1)), false)
   on conflict (id) do nothing;
   return new;
 end $$;
@@ -426,7 +427,7 @@ begin
   perform pg_temp.pol('materials', 'materials_select', 'select', member, null);
   perform pg_temp.pol('materials', 'materials_insert', 'insert', null, staff);
   perform pg_temp.pol('materials', 'materials_update', 'update', staff, staff);
-  perform pg_temp.pol('materials', 'materials_delete', 'delete', staff, null);
+  perform pg_temp.pol('materials', 'materials_delete', 'delete', admin, null);
 
   perform pg_temp.pol('audit_log', 'audit_select', 'select', admin, null);
 end $$;
@@ -459,6 +460,8 @@ create table if not exists public.project_stages (
 create or replace function public.project_stage_stamp()
 returns trigger language plpgsql set search_path = public as $$
 begin
+  -- المرحلة لا تُنقل لمشروع آخر ولا تتغيّر مرحلتها
+  if tg_op = 'UPDATE' then new.project_id := old.project_id; new.checkpoint := old.checkpoint; end if;
   if new.status = 'not_started' then
     new.start_date := null; new.end_date := null;
   elsif new.status = 'in_progress' then
@@ -959,6 +962,43 @@ begin
     raise notice 'pg_cron غير متوفر هنا: النسخ التلقائي الليلي لن يعمل';
   end if;
 end $$;
+
+-- ==========================================================
+-- تقوية الحماية (مراجعة الوكلاء، المجموعة 2)
+-- ==========================================================
+-- الحساب الجديد يبدأ غير مفعّل
+alter table public.profiles alter column active set default false;
+
+-- "من أنشأ" يُحدَّد على الخادم فلا يُزوَّر من الهاتف
+create or replace function public.set_created_by()
+returns trigger language plpgsql set search_path = '' as $$
+begin
+  new.created_by := coalesce(auth.uid(), new.created_by);
+  return new;
+end $$;
+drop trigger if exists projects_created_by on public.projects;
+create trigger projects_created_by before insert on public.projects for each row execute function public.set_created_by();
+drop trigger if exists materials_created_by on public.materials;
+create trigger materials_created_by before insert on public.materials for each row execute function public.set_created_by();
+
+-- رابط الموقع: خرائط Google وWaze وApple فقط (لا صفحات تصيّد تُفتح للفنيين)
+alter table public.projects drop constraint if exists projects_map_url_check;
+alter table public.projects add constraint projects_map_url_check check (map_url is null or (char_length(map_url) <= 500 and
+  map_url ~ '^https://((www\.)?google\.[a-z.]{2,8}/maps|maps\.google\.[a-z.]{2,8}|maps\.app\.goo\.gl|goo\.gl/maps|(www\.|ul\.)?waze\.com|maps\.apple\.com)([/?#][^[:space:]<>"]*)?$'));
+
+-- لا يبقى النظام بلا مدير: لا تعطيل ولا تخفيض لآخر مدير مفعّل
+create or replace function public.protect_last_admin()
+returns trigger language plpgsql security definer set search_path = '' as $$
+begin
+  if old.role = 'admin' and old.active and (new.role <> 'admin' or not new.active)
+     and not exists (select 1 from public.profiles where role = 'admin' and active and id <> old.id) then
+    raise exception 'لا يمكن تعطيل أو تخفيض آخر مدير في النظام';
+  end if;
+  return new;
+end $$;
+revoke execute on function public.protect_last_admin() from public, anon;
+drop trigger if exists profiles_last_admin on public.profiles;
+create trigger profiles_last_admin before update on public.profiles for each row execute function public.protect_last_admin();
 
 -- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:

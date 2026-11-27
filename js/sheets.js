@@ -96,7 +96,7 @@
   // بطاقة العميل والمواعيد
   function clientCard(p, sp) {
     const sc = A.schedule(p, sp.pct, sp.status);
-    const safeMap = p.map_url && /^https:\/\/[^\s<>"]+$/.test(p.map_url) ? p.map_url : null;
+    const safeMap = p.map_url && A.MAP_URL.test(p.map_url) ? p.map_url : null;
     const items = [
       p.customer_name ? ['العميل', p.customer_name] : null,
       p.customer_phone ? ['الهاتف', h('a', { href: 'tel:' + p.customer_phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, p.customer_phone)] : null,
