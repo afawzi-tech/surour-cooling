@@ -1387,3 +1387,24 @@ a.pill-btn:active { transform: scale(.96); }
 .tech-cps summary { cursor: pointer; font-family: var(--f-head); font-weight: 700; min-height: 44px; display: flex; align-items: center; }
 .tech-cps > section { border: 0; padding: 0; margin-top: 8px; }
 .tech-note { margin: -6px 4px 0; }
+
+/* أقسام اللوحة المطوية على الهاتف */
+.fc.fold { gap: 0; }
+.fc.fold > summary { list-style: none; cursor: pointer; min-height: 32px; flex-wrap: wrap; align-items: center; row-gap: 2px; }
+.fc.fold > summary::-webkit-details-marker { display: none; }
+.fc.fold > summary::after { content: '⌄'; color: var(--muted); font-size: 1.1rem; margin-inline-start: auto; order: 9; }
+.fc.fold[open] > summary::after { content: '⌃'; }
+.fc.fold[open] > summary { margin-bottom: 12px; }
+.fold-hint { flex-basis: 100%; color: var(--muted); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; order: 10; }
+.fc.fold[open] .fold-hint { display: none; }
+
+/* جدول متابعة الوحدات: المراحل الـ13 كلها بعرض الشاشة */
+.xl.tracker thead th.cp { min-width: 0; width: 36px; max-width: 36px; height: 124px; padding: 6px 0; vertical-align: bottom; }
+.xl.tracker .cp-v { writing-mode: vertical-rl; transform: rotate(180deg); display: inline-block; white-space: nowrap; font-size: .78rem; font-weight: 600; line-height: 1; }
+.xl.tracker td.res { min-width: 36px; width: 36px; max-width: 36px; }
+.xl.tracker .cell { height: 32px; font-size: .95rem; }
+.xl.tracker th.f { padding: 3px 4px; font-size: .78rem; }
+.xl.tracker td.rem { min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.xl.tracker td.stk { min-width: 64px; }
+@media (max-width: 1400px) { .xl.tracker thead th:last-child, .xl.tracker td.rem { display: none; } }
+@media (max-width: 760px) { .avg-card { padding: 12px 14px; } .avg-card .st-ring.lg { width: 60px; height: 60px; } .avg-card .st-face b { font-size: .8rem; } }

@@ -520,7 +520,7 @@
       .sort((a, b) => (a.g === 'غير محددة') - (b.g === 'غير محددة') || String(a.g).localeCompare(String(b.g), 'ar', { numeric: true }));
     return h('section', { class: 'd2-group' }, h('h2', null, title),
       h('ul', { class: 'brand-list grp-list' }, list.map((x) => h('li', null, h('div', { class: 'grp-row' },
-        h('b', { dir: 'auto' }, x.g), h('small', null, `${num(x.n)} ${W.one}، مكتملة ${num(x.done)}`),
+        h('b', { dir: 'auto' }, x.g), h('small', null, `${A.unitCount(W, x.n)}، المكتمل ${num(x.done)}`),
         h('span', { class: 'st-bar' }, h('span', { style: { width: (x.pct * 100).toFixed(1) + '%' } })), h('span', { class: 'bp' }, A.pctText(x.pct)),
         x.fail || x.alert ? h('span', { class: 'grp-flags' }, x.fail ? h('span', { class: 'chip st-has-failure' }, `${x.fail} فيها فشل`) : null, x.alert ? h('span', { class: 'chip alert' }, `${x.alert} تنبيه`) : null) : null)))));
   }
@@ -582,11 +582,11 @@
     const cps = S.checkpoints;
     const staff = A.isStaff();
     return h('div', { class: 'xl-wrap' }, h('table', { class: 'xl tracker' },
+      // أسماء المراحل عمودية وأعمدتها ضيقة حتى تظهر المراحل الـ13 كلها بلا تمرير أفقي؛ رقم ITP في التلميح
       h('thead', null,
-        h('tr', { class: 'itp' }, h('th', { class: 'stk' }), h('th'), h('th'), cps.map((c) => h('th', { dir: 'ltr' }, c.itp_ref)), h('th', { colspan: 8 })),
         h('tr', null,
           h('th', { class: 'stk' }, `${W.the}`), h('th', null, 'المنطقة'), h('th', null, 'الفرقة'),
-          cps.map((c) => h('th', { class: 'cp', title: c.name_en }, c.name_ar)),
+          cps.map((c) => h('th', { class: 'cp', title: `${c.name_ar} · ${c.name_en} · ${c.itp_ref}`, scope: 'col' }, h('span', { class: 'cp-v' }, c.name_ar))),
           h('th', { class: 'f' }, 'ناجح'), h('th', { class: 'f' }, 'فاشل'), h('th', { class: 'f' }, 'الإنجاز'), h('th', { class: 'f' }, 'NCR'),
           h('th', { class: 'f' }, 'الحالة'), h('th', { class: 'f' }, 'الخطوة التالية'), h('th', { class: 'f' }, 'تنبيه'), h('th', null, 'ملاحظات'))),
       h('tbody', null, list.map(({ u, k }) => {
@@ -1346,7 +1346,7 @@
         if (r.error) errors.push((x.ncr_no || x.code) + ': ' + A.errText(r.error)); else nDone++;
       }
       await A.loadProject(p.id, true); A.loadCrewUnits();
-      UI.append(clear(out), [h('p', { class: 'ok-text' }, `✓ تم: ${units.length} ${W.one}، ${done} نتيجة، ${tDone} سطر قراءات، ${nDone} NCR.`),
+      UI.append(clear(out), [h('p', { class: 'ok-text' }, `✓ تم: ${A.unitCount(p, units.length)}، ونتائج ${num(done)}، وقراءات ${num(tDone)}، وحالات عدم مطابقة ${num(nDone)}.`),
         errors.length ? h('div', { class: 'err' }, h('b', null, `${errors.length} خطأ:`), h('ul', null, errors.slice(0, 30).map((e) => h('li', null, e)))) : null]);
       A.modal('اكتمل الاستيراد', out, [{ label: 'عرض Villa Tracker', cls: 'primary', run: () => { A.go(`project/${p.id}/tracker`); A.render(); } }]);
     } catch (e) {

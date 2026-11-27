@@ -130,3 +130,16 @@ test('قاعدة كلمة المرور', () => {
   assert.equal(C.strongEnough('كلمة1234'), false, 'حروف إنجليزية مطلوبة مثل إعداد Supabase');
   assert.equal(C.strongEnough('ab1'), false);
 });
+
+test('عدد الوحدات بصيغة عربية صحيحة', () => {
+  const villa = { unit_label: 'فيلا' }, house = { unit_label: 'بيت' };
+  assert.equal(C.unitCount(villa, 1), 'فيلا واحدة');
+  assert.equal(C.unitCount(villa, 2), 'فيلتان');
+  assert.equal(C.unitCount(villa, 5), '5 فلل');
+  assert.equal(C.unitCount(villa, 60), '60 فيلا');
+  assert.equal(C.unitCount(house, 1), 'بيت واحد');
+  assert.equal(C.unitCount(house, 12), '12 بيتاً');
+  assert.equal(C.unitCount(house, 100), '100 بيت');
+  assert.equal(C.unitCount(house, 250), '250 بيتاً');
+  assert.equal(C.unitCount(C.unitWords(villa), 3), '3 فلل');
+});

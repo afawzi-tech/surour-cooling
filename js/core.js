@@ -25,12 +25,21 @@
   const BRAND_SUGGEST = ['LG', 'Midea', 'Gree', 'Samsung', 'Daikin', 'Carrier', 'Toshiba', 'Hitachi', 'Mitsubishi', 'Haier', 'TCL'];
   // صيغ اسم الوحدة: المفرد، المعرّف، الجمع، الجمع المعرّف، المؤنث؟
   const UNIT_WORDS = {
-    'فيلا': ['فيلا', 'الفيلا', 'فلل', 'الفلل', true], 'بيت': ['بيت', 'البيت', 'بيوت', 'البيوت', false],
-    'شقة': ['شقة', 'الشقة', 'شقق', 'الشقق', true], 'طابق': ['طابق', 'الطابق', 'طوابق', 'الطوابق', false],
-    'مبنى': ['مبنى', 'المبنى', 'مبانٍ', 'المباني', false], 'منظومة': ['منظومة', 'المنظومة', 'منظومات', 'المنظومات', true],
-    'وحدة': ['وحدة', 'الوحدة', 'وحدات', 'الوحدات', true]
+    // المفرد، المعرّف، الجمع، الجمع المعرّف، مؤنث؟، المثنى، التمييز المنصوب (11-99)
+    'فيلا': ['فيلا', 'الفيلا', 'فلل', 'الفلل', true, 'فيلتان', 'فيلا'], 'بيت': ['بيت', 'البيت', 'بيوت', 'البيوت', false, 'بيتان', 'بيتاً'],
+    'شقة': ['شقة', 'الشقة', 'شقق', 'الشقق', true, 'شقتان', 'شقة'], 'طابق': ['طابق', 'الطابق', 'طوابق', 'الطوابق', false, 'طابقان', 'طابقاً'],
+    'مبنى': ['مبنى', 'المبنى', 'مبانٍ', 'المباني', false, 'مبنيان', 'مبنى'], 'منظومة': ['منظومة', 'المنظومة', 'منظومات', 'المنظومات', true, 'منظومتان', 'منظومة'],
+    'وحدة': ['وحدة', 'الوحدة', 'وحدات', 'الوحدات', true, 'وحدتان', 'وحدة']
   };
-  const unitWords = (p) => { const w = UNIT_WORDS[p?.unit_label] || UNIT_WORDS['وحدة']; return { one: w[0], the: w[1], many: w[2], theMany: w[3], fem: w[4] }; };
+  const unitWords = (p) => { const w = UNIT_WORDS[p?.unit_label] || UNIT_WORDS['وحدة']; return { one: w[0], the: w[1], many: w[2], theMany: w[3], fem: w[4], two: w[5], acc: w[6] }; };
+  // عدد الوحدات بصيغة عربية صحيحة: فيلا واحدة، فيلتان، 5 فلل، 60 فيلا، 250 فيلا
+  const unitCount = (p, n) => {
+    const w = p && p.one ? p : unitWords(p), r = n % 100;   // يقبل المشروع أو كلماته الجاهزة
+    if (n === 1) return `${w.one} ${w.fem ? 'واحدة' : 'واحد'}`;
+    if (n === 2) return w.two;
+    if (n >= 3 && n <= 10) return `${num(n)} ${w.many}`;
+    return `${num(n)} ${r >= 11 && r <= 99 ? w.acc : w.one}`;
+  };
   // قيم الخانات كما في الملف، مع الاسم العربي للعرض
   const RES = { pass: 'Pass', fail: 'Fail', pending: 'Pending', na: 'N/A' };
   const RES_AR = { pass: 'ناجح', fail: 'فاشل', pending: 'معلّق', na: 'لا ينطبق' };
@@ -147,7 +156,7 @@
   // كلمة المرور: 8 أحرف على الأقل فيها حروف إنجليزية وأرقام (نفس قاعدة إعداد Supabase Auth)
   const strongEnough = (p) => p.length >= 8 && p.length <= 72 && /[0-9]/.test(p) && /[A-Za-z]/.test(p);
 
-  const Core = { ROLES, GOVS, PTYPES, isCompound, BRAND_SUGGEST, UNIT_WORDS, unitWords, RES, RES_AR, STATUS_AR, STAGE_AR,
+  const Core = { ROLES, GOVS, PTYPES, isCompound, BRAND_SUGGEST, UNIT_WORDS, unitWords, unitCount, RES, RES_AR, STATUS_AR, STAGE_AR,
     F, openNcrsOf, pctText, progress, BEHIND_GAP, MAP_URL, todayStr, dayDiff, schedule, daysAr, dueText, cntAr, norm, digits, strongEnough };
   g.Core = Core;
   if (typeof module !== 'undefined' && module.exports) module.exports = Core;
