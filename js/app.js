@@ -342,6 +342,7 @@
     techs: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
     reports: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M8 12l2.5 2.5L16 9', 'M8 18h8'],
     calendar: ['M4 5h16v16H4z', 'M4 10h16', 'M8 3v4', 'M16 3v4', 'M8 14h2', 'M14 14h2', 'M8 18h2'],
+    search: ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z', 'M21 21l-5-5'],
     more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
   };
   function icon(k) {
@@ -386,10 +387,12 @@
     return [
       h('aside', { class: 'side', 'aria-label': 'القائمة الرئيسية' },
         h('a', { href: '#/home', class: 'side-logo', onClick: stay('home') }, logo(), h('span', null, 'متابعة المشاريع')),
+        window.Insights ? h('button', { type: 'button', class: 'side-search', onClick: () => window.Insights.search() }, icon('search'), h('span', null, 'بحث'), h('kbd', { dir: 'ltr' }, 'Ctrl K')) : null,
         h('nav', { class: 'side-nav' }, menu.map(link)),
         p ? h('div', { class: 'side-proj' }, h('small', null, 'المشروع المفتوح'), h('a', { href: '#/project/' + p.id }, p.client)) : null,
         me),
-      h('header', { class: 'mtop' }, h('a', { href: '#/home', onClick: stay('home') }, logo()), p ? h('span', { class: 'mtop-crumb' }, p.client) : null),
+      h('header', { class: 'mtop' }, h('a', { href: '#/home', onClick: stay('home') }, logo()), p ? h('span', { class: 'mtop-crumb' }, p.client) : null,
+        window.Insights ? h('button', { type: 'button', class: 'mtop-search', 'aria-label': 'بحث', onClick: () => window.Insights.search() }, icon('search')) : null),
       // في صفحات المجمّع يظهر شريط المجمّع السفلي بدل هذا
       p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 3).map(link), more)
     ];
@@ -626,6 +629,7 @@
         stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
         stat('لم تبدأ', by('not_started'), 'muted', 'not_started'), stat('متأخرة', lateN, lateN ? 'bad' : 'muted', 'late'), stat('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'muted', 'attn')),
       window.Reports ? window.Reports.homeBox() : null,
+      window.Insights ? window.Insights.homeBoxes(rows) : null,
       h('section', { class: 'd2-pipe' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'أين تقف المشاريع'),
         h('span', { class: 'd2-note' }, 'عدد المشاريع عند كل مرحلة' + (rows.some((r) => r.compound) ? '. المجمّعات تُتابَع وحدةً وحدة في قسمها' : ''))), pipe),
       h('div', { class: 'd2-two' }, duesBox, crewsBox),

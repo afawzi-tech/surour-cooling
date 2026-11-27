@@ -1240,3 +1240,49 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 @media (max-width: 640px) {
   .ev { grid-template-columns: 84px 10px minmax(0, 1fr); gap: 10px; }
 }
+
+/* ---------- من TaskFlow: البحث الشامل، تحتاج منفّذ، الإنجاز آخر 14 يوماً ---------- */
+.side-search { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 6px 10px; margin: 0 0 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2, var(--surface)); color: var(--muted); font: inherit; font-size: .88rem; cursor: pointer; text-align: start; }
+.side-search:hover { border-color: var(--sky); color: var(--text); }
+.side-search span { flex: 1; }
+.side-search kbd { font-family: var(--f-body); font-size: .7rem; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); }
+.mtop-search { margin-inline-start: auto; width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: none; color: var(--text); cursor: pointer; flex: none; }
+.dialog.gs-dlg { width: min(620px, calc(100% - 24px)); margin-top: 10vh; }
+.gs { gap: 10px; }
+.gs-input { width: 100%; font-size: 1.05rem; padding: 12px 14px; border-radius: 10px; }
+.gs-list { list-style: none; margin: 0; padding: 0; max-height: 52vh; overflow: auto; }
+.gs-list li[role=option] { display: grid; grid-template-columns: 62px 1fr; gap: 0 10px; align-items: center; padding: 9px 10px; border-radius: 9px; cursor: pointer; min-height: 44px; }
+.gs-list li.on { background: var(--brand-soft); }
+.gs-list b { font-family: var(--f-head); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs-list small { grid-column: 2; color: var(--muted); font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gs-kind { grid-row: span 2; font-size: .72rem; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; text-align: center; }
+.gs-empty { padding: 14px 10px; }
+.gs-hint { margin: 0; }
+@media (max-width: 640px) { .gs-hint { display: none; } .dialog.gs-dlg { margin-top: 12px; } }
+
+.owner-list { list-style: none; margin: 0; padding: 0; }
+.owner-list li + li { border-top: 1px dashed var(--grid); }
+.owner-list a { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 2px; color: var(--ink); text-decoration: none; min-height: 44px; }
+.owner-list a b { font-family: var(--f-head); }
+.owner-list a span { grid-column: 1; color: var(--survey); font-size: .88rem; font-weight: 600; }
+.owner-list a small { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--ink-2); font-size: .8rem; }
+.owner-list a small.late { color: var(--bad); }
+.owner-list .more { padding: 8px 2px; }
+.d2-owner .calm { color: var(--ok); font-weight: 600; margin: 8px 0 0; }
+.d2-owner.has h2 { color: var(--survey); }
+
+.thru { display: grid; grid-template-columns: repeat(14, minmax(0, 1fr)); gap: 4px; height: 150px; align-items: end; padding-top: 18px; border-bottom: 1px solid var(--grid); }
+.th-day { display: flex; flex-direction: column; height: 100%; align-items: stretch; }
+.th-bars { flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 2px; }
+.th-bars span { width: 40%; max-width: 12px; border-radius: 3px 3px 0 0; position: relative; min-height: 0; }
+.th-s { background: var(--t2, #9DB4C8); }
+.th-e { background: var(--ok); }
+.th-e i { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); font-style: normal; font-size: .7rem; font-weight: 700; color: var(--ok); }
+.th-day small { text-align: center; font-size: .66rem; color: var(--ink-2); padding-top: 4px; white-space: nowrap; overflow: hidden; }
+.th-day.today small { color: var(--ink); font-weight: 700; }
+.th-day.fri .th-bars { background: repeating-linear-gradient(45deg, transparent 0 4px, var(--grid) 4px 5px); border-radius: 4px 4px 0 0; }
+.th-foot { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 8px; align-items: center; }
+.th-key { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--ink-2); }
+.th-key i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+.th-key i + * , .th-key i:not(:first-child) { margin-inline-start: 6px; }
+@media (max-width: 640px) { .th-day small { font-size: .58rem; } .thru { gap: 2px; } }
