@@ -1821,7 +1821,8 @@ b, strong { font-weight: 700; }
 /* الترحيب */
 .d-hero { position: relative; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; min-height: 160px; padding: 22px 26px; border-radius: 22px; overflow: hidden;
   background: linear-gradient(270deg, var(--bg) 35%, color-mix(in srgb, var(--sky-soft) 90%, transparent)); }
-.d-hero::before { content: ''; position: absolute; inset-block: 0; inset-inline-end: 0; width: min(52%, 560px); background: url(img/hero-building.svg) left bottom / contain no-repeat; opacity: .95; pointer-events: none; }
+.d-hero::before { content: ''; position: absolute; inset-block: 0; inset-inline-end: 0; width: min(50%, 620px); background: url(img/hero-building.jpg) center 38% / cover no-repeat; pointer-events: none;
+  -webkit-mask-image: linear-gradient(to right, #000 45%, transparent); mask-image: linear-gradient(to right, #000 45%, transparent); }
 .dh-text { position: relative; display: flex; flex-direction: column; gap: 8px; }
 .d-hero h1 { font-size: clamp(1.7rem, 3.4vw, 2.6rem); font-weight: 700; color: var(--text); }
 .d-hero p { font-size: 1.1rem; color: var(--muted); }
@@ -1966,7 +1967,7 @@ b, strong { font-weight: 700; }
 }
 @media (max-width: 760px) {
   .d-hero { padding: 18px; min-height: 0; flex-direction: column; }
-  .d-hero::before { width: 70%; opacity: .35; }
+  .d-hero::before { width: 80%; opacity: .14; }
   .dh-date { align-self: flex-start; }
   .kpis { gap: 10px; }
   .kpi { padding: 14px; min-height: 96px; flex-direction: column; align-items: flex-start; }
@@ -1982,5 +1983,5 @@ b, strong { font-weight: 700; }
   .dt td[data-l="المرحلة"]::before { content: none; }
   .dt-go { position: absolute; top: 12px; inset-inline-end: 0; }
 }
-:root[data-theme="dark"] .d-hero::before { opacity: .55; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .d-hero::before { opacity: .55; } }
+:root[data-theme="dark"] .d-hero::before { opacity: .45; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .d-hero::before { opacity: .45; } }
