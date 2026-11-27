@@ -20,6 +20,10 @@
 
 create extension if not exists pgcrypto;
 
+-- "اليوم" بتوقيت بغداد، لا UTC (الخادم بتوقيت UTC، فبين 00:00 و03:00 كان اليوم يُحسب أمس)
+create or replace function public.today_iq()
+returns date language sql stable set search_path = '' as $$ select (now() at time zone 'Asia/Baghdad')::date $$;
+
 -- ---------- المستخدمون والأدوار ----------
 create table if not exists public.profiles (
   id          uuid primary key references auth.users (id) on delete cascade,
@@ -66,7 +70,13 @@ create trigger profiles_protect_self before update on public.profiles
 
 -- ---------- إزالة ما لا يوجد في ملف Excel (من الإصدارات السابقة) ----------
 drop view if exists public.unit_overview;
-drop table if exists public.project_stages cascade;
+-- جدول المراحل الثماني القديم (v2) فقط: لا نحذف الجدول الحالي (مراحل الـ13، فيه عمود checkpoint)
+do $$ begin
+  if exists (select 1 from information_schema.tables where table_schema = 'public' and table_name = 'project_stages')
+     and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'project_stages' and column_name = 'checkpoint') then
+    drop table public.project_stages cascade;
+  end if;
+end $$;
 drop table if exists public.brand_limits cascade;
 -- جداول الإصدار 3 ببنية مختلفة: تُحذف فقط إذا كانت بالبنية القديمة (حتى لا تضيع بيانات عند إعادة التشغيل)
 do $$ begin
@@ -89,13 +99,14 @@ drop function if exists public.ncr_before_write() cascade;
 create table if not exists public.projects (
   id             uuid primary key default gen_random_uuid(),
   client         text not null check (char_length(btrim(client)) between 1 and 200),   -- اسم المشروع
-  contract_date  date not null default current_date,
+  contract_date  date not null default public.today_iq(),
   notes          text check (char_length(notes) <= 4000),
   created_by     uuid references public.profiles (id) on delete set null default auth.uid(),
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now()
 );
-alter table public.projects alter column contract_date set default current_date;
+alter table public.projects alter column contract_date set default public.today_iq();
+alter table if exists public.ncrs alter column date_raised set default public.today_iq();
 alter table public.projects drop column if exists weights;
 alter table public.projects drop column if exists require_readings;
 -- الخلايا الصفراء في Test Records (الصف 2)
@@ -237,7 +248,7 @@ create table if not exists public.ncrs (
   id           uuid primary key default gen_random_uuid(),
   project_id   uuid not null references public.projects (id) on delete cascade,
   ncr_no       text not null check (char_length(btrim(ncr_no)) between 1 and 40),   -- A
-  date_raised  date not null default current_date,                                  -- B
+  date_raised  date not null default public.today_iq(),                                  -- B
   unit_id      uuid not null references public.units (id) on delete cascade,        -- C
   checkpoint   text not null references public.qc_checkpoints (key),                -- D
   description  text not null check (char_length(btrim(description)) between 1 and 2000), -- E
@@ -265,7 +276,7 @@ begin
       raise exception 'الفيلا ليست من هذا المشروع';
     end if;
   end if;
-  if new.status = 'closed' and new.date_closed is null then new.date_closed := current_date; end if;
+  if new.status = 'closed' and new.date_closed is null then new.date_closed := public.today_iq(); end if;
   if new.status = 'open' then new.date_closed := null; end if;
   return new;
 end $$;
@@ -348,6 +359,7 @@ alter table public.audit_log      enable row level security;
 
 revoke all on all tables in schema public from anon;
 revoke execute on all functions in schema public from anon, public;
+grant execute on function public.today_iq() to authenticated, service_role;
 grant execute on function public.app_role(), public.is_staff(), public.is_admin() to authenticated;
 
 grant usage on schema public to authenticated;
@@ -449,10 +461,11 @@ begin
   if new.status = 'not_started' then
     new.start_date := null; new.end_date := null;
   elsif new.status = 'in_progress' then
-    new.start_date := coalesce(new.start_date, current_date); new.end_date := null;
+    new.start_date := coalesce(new.start_date, public.today_iq()); new.end_date := null;
   elsif new.status = 'done' then
-    new.end_date := coalesce(new.end_date, current_date);
-    new.start_date := coalesce(new.start_date, least(new.end_date, current_date));
+    new.end_date := coalesce(new.end_date, public.today_iq());
+    -- البدء لا يتجاوز الانتهاء (مرحلة بتاريخ بدء مستقبلي تُكمل اليوم بدل رسالة "قيمة غير مقبولة")
+    new.start_date := least(coalesce(new.start_date, new.end_date), new.end_date);
   end if;
   new.updated_by := auth.uid();
   new.updated_at := now();

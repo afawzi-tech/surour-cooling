@@ -7,7 +7,8 @@
 (() => {
   'use strict';
 
-  const { h, clear, toast, confirmBox, num, date } = window.UI;
+  const UI = window.UI;
+  const { h, clear, toast, confirmBox, num, date } = UI;
   const A = window.App;
   const S = A.state;
   const X = window.XLSX_LITE;
@@ -24,7 +25,18 @@
   const RES_KEYS = ['pass', 'fail', 'pending', 'na'];
   const SYM = { pass: '✓', fail: '✗', pending: '·', na: '—' };
   const CHECK_AR = { OK: 'مقبول', CHECK: 'راجع' };
-  const today = () => new Date().toISOString().slice(0, 10);
+  const today = () => new Date().toLocaleDateString('en-CA');   // التاريخ المحلي (بغداد)
+  // الرقم التالي = أكبر رقم موجود + 1، حتى لا يتكرر بعد حذف
+  const nextNcrNo = (nos) => 'NCR-' + String(nos.reduce((m, x) => Math.max(m, Number(String(x || '').match(/(\d+)\s*$/)?.[1] || 0)), 0) + 1).padStart(3, '0');
+  // أرقام ونصوص لاتينية داخل جملة عربية: تبقى بترتيبها ولا تنقلب رموزها (≤ ≥ % والتواريخ)
+  const ltr = (t) => h('bdi', { dir: 'ltr' }, String(t));
+  // أرقام من لوحة مفاتيح عربية: ٠-٩ و۰-۹ ← 0-9، والفاصلة العشرية ٫ أو , ← .
+  // يرجع null للفارغ وNaN لغير الصالح (حتى لا تُحفظ قيمة مرفوضة كفراغ)
+  const toNum = (v) => {
+    const t = String(v ?? '').trim().replace(/[٠-٩]/g, (c) => c.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (c) => c.charCodeAt(0) - 0x6F0)
+      .replace(/[٫,]/g, '.').replace(/\s+/g, '');
+    return t === '' ? null : /^[-+]?\d*\.?\d+$/.test(t) ? Number(t) : NaN;
+  };
   const projectOf = (id) => S.projects.find((p) => p.id === id);
   const blank = (v) => v === null || v === undefined || v === '';
   const mobile = () => window.matchMedia('(max-width: 760px)').matches;
@@ -126,20 +138,33 @@
     const cur = sp.status === 'done' ? null : sp.cur;
     const nextAfter = (key) => sp.list.find((x) => x.c.position > S.checkpoints.find((c) => c.key === key).position && x.s.status === 'not_started');
 
+    // تراجع: نعيد المراحل كما كانت قبل الضغط (الحالة والتواريخ والمنفّذ)
+    const snap = (x) => ({ key: x.c.key, row: { status: x.s.status, start_date: x.s.start_date ?? null, end_date: x.s.end_date ?? null, crew: x.s.crew ?? null, crew_id: x.s.crew_id ?? null, notes: x.s.notes ?? null } });
+    const undoWith = (snaps) => ({ label: 'تراجع', run: async () => {
+      for (const x of snaps) await saveStage(p, x.key, x.row);
+      toast('تم التراجع'); A.render();
+    } });
+
     // إكمال المرحلة الحالية وبدء التالية
     const complete = async (btn) => {
       btn.disabled = true;
       const nx = nextAfter(cur.c.key);
+      const before = [snap(cur), ...(nx ? [snap(nx)] : [])];
       const ok = await saveStage(p, cur.c.key, { status: 'done', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
-      if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
-      if (ok) { toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل'); S._just = { p: p.id, done: cur.c.key, start: nx?.c.key || null, pct: sp.pct }; }
+      // المرحلة التالية تحتفظ بمنفّذها إن كانت مسندة مسبقاً، وإلا تأخذ منفّذ الحالية
+      if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: nx.s.crew ?? cur.s.crew ?? null, crew_id: nx.s.crew_id ?? cur.s.crew_id ?? null });
+      if (ok) {
+        toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل', 'ok', undoWith(before));
+        S._just = { p: p.id, done: cur.c.key, start: nx?.c.key || null, pct: sp.pct };
+      }
       A.render();
     };
     const start = async (btn, crew, team) => {
       btn.disabled = true;
-      const n = crew.value === '' ? null : Number(crew.value);
+      const n = toNum(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { btn.disabled = false; return toast('عدد الكوادر من 0 إلى 500', 'error'); }
-      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n, crew_id: team.value || null })) { toast(`بدأت مرحلة "${cur.c.name_ar}"`); S._just = { p: p.id, done: null, start: cur.c.key, pct: sp.pct }; }
+      const before = [snap(cur)];
+      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n, crew_id: team.value || null })) { toast(`بدأت مرحلة "${cur.c.name_ar}"`, 'ok', undoWith(before)); S._just = { p: p.id, done: null, start: cur.c.key, pct: sp.pct }; }
       A.render();
     };
 
@@ -149,7 +174,7 @@
         h('h2', null, 'كل المراحل مكتملة'), h('p', null, `انتهت آخر مرحلة ${sp.list.map((x) => x.s.end_date).filter(Boolean).sort().pop() || ''}.`));
     } else if (cur) {
       const ip = cur.s.status === 'in_progress';
-      const crew = h('input', { type: 'number', min: 0, max: 500, inputmode: 'numeric', dir: 'ltr', placeholder: '0', value: cur.s.crew ?? '' , class: 'crew-in' });
+      const crew = h('input', { type: 'text', inputmode: 'numeric', maxlength: 4, dir: 'ltr', placeholder: '0', value: cur.s.crew ?? '', class: 'crew-in', autocomplete: 'off' });
       // اقتراح فرقة المرحلة السابقة
       const prevCrew = [...sp.list].reverse().find((x) => x.s.status === 'done' && x.s.crew_id)?.s.crew_id;
       const team = crewSelect(cur.s.crew_id || prevCrew || '');
@@ -157,7 +182,7 @@
       panel = h('section', { class: 'now-card ' + (ip ? 'ip' : 'ns') + (just?.start === cur.c.key ? ' just-start' : '') },
         h('span', { class: 'nc-tag' }, ip ? `المرحلة الحالية · ${num(cur.c.position)} من ${num(total)}` : `المرحلة التالية · ${num(cur.c.position)} من ${num(total)}`),
         h('h2', null, cur.c.name_ar),
-        ip ? h('p', null, (cur.s.start_date ? `بدأت ${sinceText(cur.s.start_date)} (${cur.s.start_date})` : 'جارية') + (crewName ? ` · ${crewName}` : '') + (cur.s.crew ? ` · ${num(cur.s.crew)} كادر` : ''))
+        ip ? h('p', null, cur.s.start_date ? ['بدأت ' + sinceText(cur.s.start_date) + ' (', ltr(cur.s.start_date), ')'] : 'جارية', (crewName ? ` · ${crewName}` : '') + (cur.s.crew ? ` · ${num(cur.s.crew)} كادر` : ''))
           : h('p', null, sp.done ? 'المرحلة السابقة اكتملت. ابدأ هذه عندما يبدأ العمل فعلاً.' : 'لم يبدأ العمل في المشروع بعد.'),
         staff ? (ip
           ? h('div', { class: 'nc-actions' },
@@ -167,18 +192,28 @@
               h('label', { class: 'crew-label' }, 'المنفّذ', team),
               h('label', { class: 'crew-label' }, 'عدد الكوادر', crew),
               h('button', { type: 'button', class: 'btn primary big', onClick: (e) => start(e.currentTarget, crew, team) }, '▶ ابدأ المرحلة'),
-              h('button', { type: 'button', class: 'btn ghost', onClick: async () => { await saveStage(p, cur.c.key, { status: 'na' }); A.render(); } }, 'لا تنطبق على هذا المشروع')))
+              h('button', { type: 'button', class: 'btn ghost', onClick: async () => {
+                if (!await confirmBox({ title: 'لا تنطبق؟', body: `ستُستثنى مرحلة "${cur.c.name_ar}" من حساب إنجاز المشروع. يمكنك إرجاعها من قائمة المراحل.`, okText: 'نعم، لا تنطبق' })) return;
+                const before = [snap(cur)];
+                if (await saveStage(p, cur.c.key, { status: 'na' })) toast(`"${cur.c.name_ar}" لا تنطبق`, 'ok', undoWith(before));
+                A.render();
+              } }, 'لا تنطبق على هذا المشروع')))
           : h('p', { class: 'muted small' }, 'تحديث المراحل للمدير والمشرف.'),
         ip && nextAfter(cur.c.key) ? h('p', { class: 'nc-next' }, `بعدها: ${nextAfter(cur.c.key).c.name_ar}`) : null);
+      // بعد بدء/إكمال مرحلة يُقفل الزر الجديد لحظة، حتى لا تُكمل الضغطة المزدوجة المرحلة التالية بالخطأ
+      if (just) panel.querySelectorAll('.nc-actions .btn').forEach((b) => { b.disabled = true; setTimeout(() => { b.disabled = false; }, 900); });
     }
 
     const steps = h('ol', { class: 'steps' }, sp.list.map(({ c, s }) => {
       const isCur = cur && cur.c.key === c.key;
-      const dates = s.status === 'done' ? `${s.start_date || '…'} ← ${s.end_date}` : s.status === 'in_progress' ? `منذ ${s.start_date}` : '';
+      const dates = s.status === 'done' ? [ltr(s.start_date || '…'), ' ← ', ltr(s.end_date)] : s.status === 'in_progress' ? ['منذ ', ltr(s.start_date)] : null;
       const inner = [
         h('span', { class: 'sp-dot' }, s.status === 'done' ? '✓' : s.status === 'na' ? '—' : num(c.position)),
         h('span', { class: 'sp-body' }, h('b', null, c.name_ar),
-          h('small', null, [dates, A.crewOf(s.crew_id)?.name || '', s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter(Boolean).join(' · ') || ' ')),
+          h('small', null, (() => {
+            const parts = [dates, A.crewOf(s.crew_id)?.name, s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter((x) => x && (!Array.isArray(x) || x.length));
+            return parts.length ? parts.flatMap((x, i) => (i ? [' · ', x] : [x])) : ' ';
+          })())),
         h('span', { class: 'chip sp-st ' + ST_CLS[s.status] }, A.STAGE_AR[s.status])
       ];
       return h('li', { class: `step ${ST_CLS[s.status]}${isCur ? ' cur' : ''}${just?.done === c.key ? ' just-done' : ''}${just?.start === c.key ? ' just-start' : ''}` },
@@ -201,26 +236,47 @@
   function assignDialog(p) {
     const sp = A.stageProgress(p);
     const open = sp.list.filter(({ s }) => s.status !== 'done' && s.status !== 'na');
-    const team = crewSelect('');
-    const boxes = open.map(({ c, s }) => h('label', { class: 'check as-row' }, h('input', { type: 'checkbox', value: c.key, checked: true }),
-      ` ${num(c.position)}. ${c.name_ar}`, h('small', { class: 'muted' }, s.crew_id ? ' (الحالي: ' + (A.crewOf(s.crew_id)?.name || '—') + ')' : '')));
-    const all = (v) => boxes.forEach((b) => { b.querySelector('input').checked = v; });
     if (!open.length) return toast('كل المراحل مكتملة أو لا تنطبق', 'error');
-    A.modal('إسناد مراحل', h('div', { class: 'stack sm' },
-      A.field('المنفّذ', team, { hint: 'اختر "بدون منفّذ" لإلغاء الإسناد' }),
-      h('div', { class: 'row' }, h('b', null, 'المراحل'), h('button', { type: 'button', class: 'btn ghost sm', onClick: () => all(true) }, 'الكل'), h('button', { type: 'button', class: 'btn ghost sm', onClick: () => all(false) }, 'لا شيء')),
-      h('div', { class: 'as-list' }, boxes)),
-    [{ label: 'إسناد', cls: 'primary', run: async () => {
-      const keys = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+    // لا اختيار افتراضي: "إسناد" معطّل حتى يُختار منفّذ، فلا يُمسح الإسناد بالخطأ
+    const team = crewSelect('');
+    team.firstChild.textContent = 'اختر الفرقة أو المقاول…';
+    team.firstChild.disabled = true; team.value = '';
+    // افتراضياً تُحدَّد المراحل التي لا منفّذ لها فقط (وإن لم توجد، كلها)
+    const unassigned = open.filter(({ s }) => !s.crew_id).length;
+    const boxes = open.map(({ c, s }) => h('label', { class: 'check as-row' }, h('input', { type: 'checkbox', value: c.key, checked: unassigned ? !s.crew_id : true, onChange: () => sync() }),
+      ` ${num(c.position)}. ${c.name_ar}`, h('small', { class: 'muted' }, s.crew_id ? ' (الحالي: ' + (A.crewOf(s.crew_id)?.name || '—') + ')' : ' (بدون منفّذ)')));
+    const picked = () => boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+    const all = (v) => { boxes.forEach((b) => { b.querySelector('input').checked = v; }); sync(); };
+    const save = async (crewId) => {
+      const keys = picked();
       if (!keys.length) { toast('اختر مرحلة واحدة على الأقل', 'error'); return false; }
       // نرسل الحالة الحالية مع المنفّذ حتى لا تتغيّر حالة أي مرحلة
-      const rows = keys.map((k) => ({ project_id: p.id, checkpoint: k, status: A.stageOf(p, k).status, crew_id: team.value || null }));
+      const rows = keys.map((k) => ({ project_id: p.id, checkpoint: k, status: A.stageOf(p, k).status, crew_id: crewId }));
       const r = await S.sb.from('project_stages').upsert(rows, { onConflict: 'project_id,checkpoint' }).select();
       if (r.error) { A.fail(r.error); return false; }
       r.data.forEach((x) => { (S.stages[p.id] ||= {})[x.checkpoint] = x; });
-      toast(team.value ? `أُسندت ${num(keys.length)} مرحلة إلى ${A.crewOf(team.value)?.name}` : 'أُلغي الإسناد');
+      toast(crewId ? `أُسندت ${A.cntAr(keys.length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} إلى ${A.crewOf(crewId)?.name}` : `أُلغي إسناد ${A.cntAr(keys.length, 'مرحلة واحدة', 'مرحلتين', 'مراحل', 'مرحلة')}`);
       A.render();
-    } }]);
+    };
+    A.modal('إسناد المراحل لفرقة أو مقاول', h('div', { class: 'stack sm' },
+      A.field('المنفّذ', team),
+      h('div', { class: 'row' }, h('b', null, 'المراحل'), h('button', { type: 'button', class: 'btn sm', onClick: () => all(true) }, 'تحديد الكل'), h('button', { type: 'button', class: 'btn sm', onClick: () => all(false) }, 'إلغاء التحديد')),
+      h('div', { class: 'as-list' }, boxes)),
+    [{ label: 'إلغاء إسناد المحدد', cls: 'ghost danger-text', run: async () => {
+      if (!picked().length) { toast('اختر مرحلة واحدة على الأقل', 'error'); return false; }
+      if (!await confirmBox({ title: 'إلغاء الإسناد', body: `ستصبح ${A.cntAr(picked().length, 'مرحلة واحدة', 'مرحلتان', 'مراحل', 'مرحلة')} بدون منفّذ.`, okText: 'إلغاء الإسناد', danger: true })) return false;
+      return save(null);
+    } },
+    { label: 'إسناد', cls: 'primary', run: () => (team.value ? save(team.value) : (toast('اختر الفرقة أو المقاول أولاً', 'error'), false)) }]);
+    const dlg = document.getElementById('dialog');
+    const mainBtn = dlg.querySelector('.btn.primary');
+    function sync() {
+      const n = picked().length, c = A.crewOf(team.value);
+      mainBtn.disabled = !c || !n;
+      mainBtn.textContent = c && n ? `إسناد ${A.cntAr(n, 'مرحلة واحدة', 'مرحلتين', 'مراحل', 'مرحلة')} إلى ${c.name}` : 'إسناد';
+    }
+    team.addEventListener('change', sync);
+    sync();
   }
 
   // نسبة الإنجاز تنتقل من قيمتها السابقة إلى الجديدة بعد إكمال مرحلة
@@ -250,14 +306,14 @@
       } }, A.STAGE_AR[k])));
     const sd = h('input', { type: 'date', value: s.start_date || '', dir: 'ltr' });
     const ed = h('input', { type: 'date', value: s.end_date || '', dir: 'ltr' });
-    const crew = h('input', { type: 'number', min: 0, max: 500, inputmode: 'numeric', dir: 'ltr', value: s.crew ?? '' });
+    const crew = h('input', { type: 'text', inputmode: 'numeric', maxlength: 4, dir: 'ltr', value: s.crew ?? '', autocomplete: 'off' });
     const team = crewSelect(s.crew_id || '');
     const notes = h('textarea', { rows: 3, maxlength: 2000 }, s.notes || '');
     A.modal(`${num(c.position)}. ${c.name_ar}`, h('div', { class: 'stack sm' }, seg,
       h('div', { class: 'form-grid' }, A.field('تاريخ البدء', sd, { hint: 'يُملأ تلقائياً عند "جارية"' }), A.field('تاريخ الانتهاء', ed, { hint: 'يُملأ تلقائياً عند "مكتملة"' }),
         A.field('المنفّذ (فرقة أو مقاول)', team), A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }))),
     [{ label: 'حفظ', cls: 'primary', run: async () => {
-      const n = crew.value === '' ? null : Number(crew.value);
+      const n = toNum(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { toast('عدد الكوادر من 0 إلى 500', 'error'); return false; }
       if (sd.value && ed.value && ed.value < sd.value) { toast('تاريخ الانتهاء قبل تاريخ البدء', 'error'); return false; }
       const ok = await saveStage(p, c.key, { status, start_date: sd.value || null, end_date: ed.value || null, crew: n, crew_id: team.value || null, notes: notes.value.trim() || null });
@@ -737,7 +793,8 @@
     const t = d.tests.get(u.id) || {};
     const el = {};
     for (const [k, [, kind]] of Object.entries(T_FIELDS)) {
-      el[k] = h('input', { type: kind === 'num' ? 'number' : kind === 'date' ? 'date' : 'text', step: 'any', dir: 'ltr', inputmode: kind === 'num' ? 'decimal' : null, value: t[k] ?? '', maxlength: kind === 'text' ? 120 : null });
+      // نص بلوحة أرقام بدل type=number: حتى تُقبل الأرقام العربية والفاصلة ولا تُرفض بصمت
+      el[k] = h('input', { type: kind === 'date' ? 'date' : 'text', dir: 'ltr', inputmode: kind === 'num' ? 'decimal' : null, autocomplete: 'off', value: t[k] ?? '', maxlength: kind === 'text' ? 120 : kind === 'num' ? 20 : null });
     }
     if (!t.unit_id && !el.inspector.value) el.inspector.value = S.profile.full_name || '';
     const grp = (title, keys) => h('fieldset', { class: 'grp' }, h('legend', null, title), h('div', { class: 'form-grid' }, keys.map((k) => A.field(T_FIELDS[k][0], el[k]))));
@@ -751,8 +808,9 @@
       for (const [k, [, kind]] of Object.entries(T_FIELDS)) {
         const v = el[k].value.trim();
         if (kind === 'num') {
-          if (v !== '' && !Number.isFinite(Number(v))) { toast(`قيمة غير صحيحة: ${T_FIELDS[k][0]}`, 'error'); return false; }
-          row[k] = v === '' ? null : Number(v);
+          const n = toNum(v);
+          if (Number.isNaN(n)) { toast(`قيمة غير صحيحة: ${T_FIELDS[k][0]} (اكتب رقماً مثل 3.99)`, 'error'); el[k].focus(); return false; }
+          row[k] = n;
         } else row[k] = v || null;
       }
       const r = await S.sb.from('test_records').upsert(row, { onConflict: 'unit_id' }).select().single();
@@ -787,9 +845,11 @@
       if (!(v >= 0) || e.target.value === '') { e.target.value = p[key]; return toast('قيمة غير صحيحة', 'error'); }
       const r = await S.sb.from('projects').update({ [key]: v }).eq('id', p.id).select().maybeSingle();
       if (r.error || !r.data) { e.target.value = p[key]; return A.fail(r.error || 'permission denied'); }
-      Object.assign(p, r.data); draw(); summary.textContent = limText(); toast('تم تحديث الحد');
+      Object.assign(p, r.data); draw(); UI.append(clear(summary), limText()); toast('تم تحديث الحد');
     } }));
-    const limText = () => `حدود القبول: هبوط الضغط ≤ ${p.lim_pressure_drop} MPa · الفاكيوم ≤ ${p.lim_vacuum_max} مايكرون · الثبات ≥ ${p.lim_vacuum_hold} دقيقة · الارتفاع ≤ 50 · الشحن ±${Math.round(p.lim_charge_tol * 1000) / 10}%`;
+    // بالكلمات بدل ≤ و≥ لأنها تنقلب في النص العربي فيُفهم الحد بالعكس
+    const limText = () => ['حدود القبول: هبوط الضغط لا يزيد على ', ltr(p.lim_pressure_drop + ' MPa'), ' · الفاكيوم لا يزيد على ', ltr(p.lim_vacuum_max), ' مايكرون · الثبات لا يقل عن ',
+      ltr(p.lim_vacuum_hold), ' دقيقة · ارتفاع الفاكيوم لا يزيد على ', ltr(50), ' · الشحن ضمن ', ltr('±' + Math.round(p.lim_charge_tol * 1000) / 10 + '%')];
     const summary = h('span', null, limText());
     draw();
     return h('div', { class: 'stack' },
@@ -842,7 +902,7 @@
   function ncrForm(p, d, n, presetUnit, presetCp) {
     const cps = S.checkpoints;
     const el = {
-      no: h('input', { value: n?.ncr_no || 'NCR-' + String(d.ncrs.length + 1).padStart(3, '0'), maxlength: 40, dir: 'ltr' }),
+      no: h('input', { value: n?.ncr_no || nextNcrNo(d.ncrs.map((x) => x.ncr_no)), maxlength: 40, dir: 'ltr' }),
       date: h('input', { type: 'date', dir: 'ltr', value: n?.date_raised || today() }),
       villa: h('select', null, d.units.map((u) => h('option', { value: u.id, selected: u.id === (n?.unit_id || presetUnit?.id) }, u.code))),
       cp: h('select', null, cps.map((c) => h('option', { value: c.key, selected: c.key === (n?.checkpoint || presetCp) }, c.name_ar))),
@@ -1226,16 +1286,23 @@
         if (!r.error && r.data) Object.assign(p, r.data);
       }
       let nDone = 0;
+      // NCR الموجودة برقمها تُحدَّث بدل تكرارها عند إعادة استيراد نفس الملف
+      const curNcrs = (await S.sb.from('ncrs').select('id, ncr_no').eq('project_id', p.id)).data || [];
+      const byNo = new Map(curNcrs.map((n) => [n.ncr_no, n.id]));
       for (const x of ncrs) {
         const u = byCode.get(x.code);
         if (!u) { errors.push(x.code + `: ${W.the} غير موجودة (NCR)`); continue; }
         const { code, ...row } = x;
-        const r = await S.sb.from('ncrs').insert({ ...row, ncr_no: row.ncr_no || 'NCR-' + String(nDone + 1).padStart(3, '0'), project_id: p.id, unit_id: u.id });
+        const no = row.ncr_no || nextNcrNo([...byNo.keys()]);
+        const r = byNo.has(no)
+          ? await S.sb.from('ncrs').update({ ...row, ncr_no: no, unit_id: u.id }).eq('id', byNo.get(no))
+          : await S.sb.from('ncrs').insert({ ...row, ncr_no: no, project_id: p.id, unit_id: u.id }).select('id').single();
+        if (!r.error && !byNo.has(no)) byNo.set(no, r.data?.id);
         if (r.error) errors.push((x.ncr_no || x.code) + ': ' + A.errText(r.error)); else nDone++;
       }
       await A.loadProject(p.id, true);
-      clear(out).append(h('p', { class: 'ok-text' }, `✓ تم: ${units.length} ${W.one}، ${done} نتيجة، ${tDone} سطر قراءات، ${nDone} NCR.`),
-        errors.length ? h('div', { class: 'err' }, h('b', null, `${errors.length} خطأ:`), h('ul', null, errors.slice(0, 30).map((e) => h('li', null, e)))) : null);
+      UI.append(clear(out), [h('p', { class: 'ok-text' }, `✓ تم: ${units.length} ${W.one}، ${done} نتيجة، ${tDone} سطر قراءات، ${nDone} NCR.`),
+        errors.length ? h('div', { class: 'err' }, h('b', null, `${errors.length} خطأ:`), h('ul', null, errors.slice(0, 30).map((e) => h('li', null, e)))) : null]);
       A.modal('اكتمل الاستيراد', out, [{ label: 'عرض Villa Tracker', cls: 'primary', run: () => { A.go(`project/${p.id}/tracker`); A.render(); } }]);
     } catch (e) {
       A.fail(e);

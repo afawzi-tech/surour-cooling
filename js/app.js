@@ -170,7 +170,8 @@
      متأخر: فات تاريخ التسليم والمشروع لم يكتمل.
      متأخر عن الجدول: الإنجاز أقل من نسبة الوقت المنقضي (من البدء إلى التسليم) بـ15 نقطة أو أكثر. */
   const BEHIND_GAP = 0.15;
-  const todayStr = () => new Date().toISOString().slice(0, 10);
+  // التاريخ المحلي للجهاز (بغداد UTC+3)، لا UTC، حتى لا يصير "اليوم" أمس بعد منتصف الليل
+  const todayStr = () => new Date().toLocaleDateString('en-CA');
   const dayDiff = (a, b) => Math.round((new Date(a) - new Date(b)) / 86400000);
   function schedule(p, pct, status) {
     const t = todayStr();
@@ -444,7 +445,7 @@
       const d = state.data[p.id];
       const D = F.dashboard(d, state.checkpoints);
       const rows = d.units.map((u) => F.row(u, state.checkpoints, openNcrsOf(d, u.id)));
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayStr();
       const fails = rows.filter((k) => k.R).length;
       const late = d.ncrs.filter((n) => n.status === 'open' && n.due_date && n.due_date < today).length;
       const status = D.B3 && D.B4 === D.B3 ? 'done' : D.B6 === D.B3 ? 'not_started' : 'in_progress';
@@ -505,7 +506,7 @@
           return h('li', { class: at.length ? 'busy' : 'free' },
             h('span', { class: 'cr-name' }, h('b', null, c.name), h('small', null, KIND_AR[c.kind] + (c.leader ? ' · ' + c.leader : ''))),
             h('span', { class: 'cr-where' }, at.length ? at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)) : 'متاحة'),
-            c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone, dir: 'ltr' }, c.phone) : null);
+            c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, c.phone) : null);
         }))]
         : h('p', { class: 'calm muted' }, isStaff() ? 'لا توجد فرق أو مقاولون بعد. أضفهم من صفحة "الفرق والمقاولون".' : 'لا توجد فرق أو مقاولون بعد.'));
 
@@ -882,7 +883,7 @@
       const cps = state.checkpoints;
       const fk = '_hf_' + scope;
       const f = state[fk] || (state[fk] = { gov: '', brand: '' });
-      const today = new Date().toISOString().slice(0, 10);
+      const today = todayStr();
       const rows = scoped.map((p) => {
         const d = state.data[p.id];
         const D = F.dashboard(d, cps);
@@ -1033,7 +1034,7 @@
         const g = byUnit.get(x.unit_id); g.items.push(x); if (x.inspected_by) g.who.add(names[x.inspected_by] || '');
       });
       const units = [...byUnit.values()];
-      box.append(h('p', { class: 'd2-note' }, `${num(rows.length)} نتيجة سُجّلت اليوم في ${num(units.length)} وحدة: ناجح ${cnt.pass}، فاشل ${cnt.fail}، لا ينطبق ${cnt.na}.`),
+      window.UI.append(box, [h('p', { class: 'd2-note' }, `${num(rows.length)} نتيجة سُجّلت اليوم في ${num(units.length)} وحدة: ناجح ${cnt.pass}، فاشل ${cnt.fail}، لا ينطبق ${cnt.na}.`),
         h('ol', { class: 'today-list' }, units.slice(0, 10).map(({ x, items, who }) => {
           const fails = items.filter((i) => i.result === 'fail');
           const passes = items.filter((i) => i.result === 'pass').length;
@@ -1043,7 +1044,7 @@
             h('span', null, fails.length ? `فاشل: ${fails.map((i) => cp[i.checkpoint]).join('، ')}` : `${passes} ناجح` + (items.length > passes ? `، ${items.length - passes} أخرى` : '')),
             h('small', null, [...who].filter(Boolean).join('، ')));
         })),
-        units.length > 10 ? h('p', { class: 'd2-note' }, `و${num(units.length - 10)} وحدة أخرى.`) : null);
+        units.length > 10 ? h('p', { class: 'd2-note' }, `و${num(units.length - 10)} وحدة أخرى.`) : null]);
     }).catch(() => { clear(box).appendChild(h('p', { class: 'calm muted' }, 'تعذّر تحميل نشاط اليوم.')); });
     return box;
   }
@@ -1345,7 +1346,7 @@
           const [units, checks, tests, ncrs, stages, crews] = await Promise.all([all('units'), all('unit_checks'), all('test_records'), all('ncrs'), all('project_stages'), all('crews')]);
           download(new Blob([JSON.stringify({ app: 'surour-vrf-qc', version: 4, exported_at: new Date().toISOString(),
             projects: state.projects, project_stages: stages, crews, units, unit_checks: checks, test_records: tests, ncrs }, null, 1)], { type: 'application/json' }),
-          `surour-backup-${new Date().toISOString().slice(0, 10)}.json`);
+          `surour-backup-${todayStr()}.json`);
           toast('تم التنزيل');
         } catch (e) { fail(e); }
         btn.disabled = false;
@@ -1357,7 +1358,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));
