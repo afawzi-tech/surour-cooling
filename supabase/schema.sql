@@ -719,6 +719,143 @@ create policy stage_photos_delete on storage.objects for delete to authenticated
   using (bucket_id = 'stage-photos' and ((storage.foldername(name))[2] = auth.uid()::text or public.is_admin()));
 
 -- ==========================================================
+-- أداء الفنيين: من سجّل كل قراءة (ضغط، فاكيوم، شحن) ومتى، يُملأ على الخادم ولا يُرسل من الهاتف.
+-- الفشل وNCR تُحسب على من سجّل قراءة ذاك الفحص، وأرقام الفرقة تُعرض بجانبها.
+-- ==========================================================
+do $$ begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'test_records' and column_name = 'pressure_by') then
+    alter table public.test_records
+      add column pressure_by uuid references public.profiles (id) on delete set null,
+      add column pressure_at timestamptz,
+      add column vacuum_by   uuid references public.profiles (id) on delete set null,
+      add column vacuum_at   timestamptz,
+      add column charge_by   uuid references public.profiles (id) on delete set null,
+      add column charge_at   timestamptz;
+    -- نقل لمرة واحدة من سجل العمليات: آخر شخص غيّر قراءات كل قسم
+    with ch as (
+      select a.row_id::uuid as unit_id, a.actor, a.at,
+        (select jsonb_agg(coalesce(a.new_data -> k, 'null')) from unnest(array['pressure_date','test_pressure','hold_hours','start_mpa','end_mpa']) k)
+          is distinct from (select jsonb_agg(coalesce(a.old_data -> k, 'null')) from unnest(array['pressure_date','test_pressure','hold_hours','start_mpa','end_mpa']) k) as p,
+        (select jsonb_agg(coalesce(a.new_data -> k, 'null')) from unnest(array['vacuum_date','vacuum_microns','vacuum_hold_min','vacuum_rise']) k)
+          is distinct from (select jsonb_agg(coalesce(a.old_data -> k, 'null')) from unnest(array['vacuum_date','vacuum_microns','vacuum_hold_min','vacuum_rise']) k) as v,
+        (select jsonb_agg(coalesce(a.new_data -> k, 'null')) from unnest(array['charge_calc_kg','charge_actual_kg','cylinder_no']) k)
+          is distinct from (select jsonb_agg(coalesce(a.old_data -> k, 'null')) from unnest(array['charge_calc_kg','charge_actual_kg','cylinder_no']) k) as c
+      from public.audit_log a
+      where a.table_name = 'test_records' and a.action in ('INSERT', 'UPDATE') and a.actor is not null
+        and exists (select 1 from public.profiles pr where pr.id = a.actor)
+    ), lp as (select distinct on (unit_id) unit_id, actor, at from ch where p order by unit_id, at desc),
+       lv as (select distinct on (unit_id) unit_id, actor, at from ch where v order by unit_id, at desc),
+       lc as (select distinct on (unit_id) unit_id, actor, at from ch where c order by unit_id, at desc)
+    update public.test_records t set
+      pressure_by = lp.actor, pressure_at = lp.at,
+      vacuum_by = lv.actor,   vacuum_at = lv.at,
+      charge_by = lc.actor,   charge_at = lc.at
+    from public.test_records t2
+      left join lp on lp.unit_id = t2.unit_id
+      left join lv on lv.unit_id = t2.unit_id
+      left join lc on lc.unit_id = t2.unit_id
+    where t.unit_id = t2.unit_id and (lp.actor is not null or lv.actor is not null or lc.actor is not null);
+  end if;
+end $$;
+create index if not exists test_records_pressure_by_idx on public.test_records (pressure_by, pressure_at);
+create index if not exists test_records_vacuum_by_idx   on public.test_records (vacuum_by, vacuum_at);
+create index if not exists test_records_charge_by_idx   on public.test_records (charge_by, charge_at);
+create index if not exists unit_checks_inspected_by_idx on public.unit_checks (inspected_by, inspected_at);
+create index if not exists stage_requests_by_idx        on public.stage_requests (requested_by, requested_at);
+
+-- يُملأ "من سجّل" لكل قسم تغيّرت قراءاته فقط، وما يرسله الهاتف في هذه الأعمدة يُتجاهل
+create or replace function public.test_record_stamp()
+returns trigger language plpgsql as $$
+declare me uuid := auth.uid();
+begin
+  if tg_op = 'UPDATE' then
+    new.unit_id := old.unit_id;
+    new.pressure_by := old.pressure_by; new.pressure_at := old.pressure_at;
+    new.vacuum_by := old.vacuum_by;     new.vacuum_at := old.vacuum_at;
+    new.charge_by := old.charge_by;     new.charge_at := old.charge_at;
+    if (new.pressure_date, new.test_pressure, new.hold_hours, new.start_mpa, new.end_mpa)
+       is distinct from (old.pressure_date, old.test_pressure, old.hold_hours, old.start_mpa, old.end_mpa) then
+      new.pressure_by := me; new.pressure_at := now();
+    end if;
+    if (new.vacuum_date, new.vacuum_microns, new.vacuum_hold_min, new.vacuum_rise)
+       is distinct from (old.vacuum_date, old.vacuum_microns, old.vacuum_hold_min, old.vacuum_rise) then
+      new.vacuum_by := me; new.vacuum_at := now();
+    end if;
+    if (new.charge_calc_kg, new.charge_actual_kg, new.cylinder_no)
+       is distinct from (old.charge_calc_kg, old.charge_actual_kg, old.cylinder_no) then
+      new.charge_by := me; new.charge_at := now();
+    end if;
+  else
+    new.pressure_by := null; new.pressure_at := null; new.vacuum_by := null; new.vacuum_at := null; new.charge_by := null; new.charge_at := null;
+    if coalesce(new.pressure_date::text, new.test_pressure::text, new.hold_hours::text, new.start_mpa::text, new.end_mpa::text) is not null then
+      new.pressure_by := me; new.pressure_at := now();
+    end if;
+    if coalesce(new.vacuum_date::text, new.vacuum_microns::text, new.vacuum_hold_min::text, new.vacuum_rise::text) is not null then
+      new.vacuum_by := me; new.vacuum_at := now();
+    end if;
+    if coalesce(new.charge_calc_kg::text, new.charge_actual_kg::text, new.cylinder_no) is not null then
+      new.charge_by := me; new.charge_at := now();
+    end if;
+  end if;
+  new.updated_by := me; new.updated_at := now();
+  return new;
+end $$;
+drop trigger if exists test_records_stamp on public.test_records;
+create trigger test_records_stamp before insert or update on public.test_records
+  for each row execute function public.test_record_stamp();
+
+-- أرقام الأداء لكل مستخدم خلال فترة (من، إلى؛ null = بلا حد).
+-- المدير والمشرف يرون الكل، والفني يرى سطره هو فقط (التحقق هنا على الخادم).
+create or replace function public.tech_performance(p_from date default null, p_to date default null)
+returns table (
+  user_id uuid, full_name text, role text, active boolean, crew_id uuid,
+  readings int, pressure int, vacuum int, charge int,
+  failed int, ncrs int, ncrs_open int,
+  results int, reports int, reports_approved int, reports_rejected int,
+  team_ncrs int, team_ncrs_open int, last_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  with lo as (select coalesce(p_from::timestamptz, '-infinity'::timestamptz) as a,
+                     coalesce((p_to + 1)::timestamptz, 'infinity'::timestamptz) as b),
+  who as (
+    select pr.* from public.profiles pr
+    where public.app_role() is not null and (public.is_staff() or pr.id = auth.uid())
+  ),
+  rd as (   -- قراءة واحدة لكل (وحدة، قسم) مع نتيجة ذاك الفحص
+    select t.unit_id, x.cp, x.by, x.at, c.result
+    from public.test_records t
+    cross join lateral (values ('pressure_test', t.pressure_by, t.pressure_at),
+                               ('vacuum', t.vacuum_by, t.vacuum_at),
+                               ('charging', t.charge_by, t.charge_at)) as x(cp, by, at)
+    left join public.unit_checks c on c.unit_id = t.unit_id and c.checkpoint = x.cp
+    cross join lo
+    where x.by is not null and x.at >= lo.a and x.at < lo.b
+  )
+  select w.id, w.full_name, w.role, w.active, w.crew_id,
+    (select count(*)::int from rd where rd.by = w.id),
+    (select count(*)::int from rd where rd.by = w.id and rd.cp = 'pressure_test'),
+    (select count(*)::int from rd where rd.by = w.id and rd.cp = 'vacuum'),
+    (select count(*)::int from rd where rd.by = w.id and rd.cp = 'charging'),
+    (select count(*)::int from rd where rd.by = w.id and rd.result = 'fail'),
+    (select count(*)::int from public.ncrs n join rd on rd.unit_id = n.unit_id and rd.cp = n.checkpoint where rd.by = w.id),
+    (select count(*)::int from public.ncrs n join rd on rd.unit_id = n.unit_id and rd.cp = n.checkpoint where rd.by = w.id and n.status = 'open'),
+    (select count(*)::int from public.unit_checks c, lo where c.inspected_by = w.id and c.result <> 'pending' and c.inspected_at >= lo.a and c.inspected_at < lo.b),
+    (select count(*)::int from public.stage_requests r, lo where r.requested_by = w.id and r.requested_at >= lo.a and r.requested_at < lo.b),
+    (select count(*)::int from public.stage_requests r, lo where r.requested_by = w.id and r.status = 'approved' and r.requested_at >= lo.a and r.requested_at < lo.b),
+    (select count(*)::int from public.stage_requests r, lo where r.requested_by = w.id and r.status = 'rejected' and r.requested_at >= lo.a and r.requested_at < lo.b),
+    (select count(*)::int from public.ncrs n join public.units u on u.id = n.unit_id
+       where w.crew_id is not null and u.crew_id = w.crew_id and (p_from is null or n.date_raised >= p_from) and (p_to is null or n.date_raised <= p_to)),
+    (select count(*)::int from public.ncrs n join public.units u on u.id = n.unit_id
+       where w.crew_id is not null and u.crew_id = w.crew_id and n.status = 'open' and (p_from is null or n.date_raised >= p_from) and (p_to is null or n.date_raised <= p_to)),
+    greatest((select max(rd.at) from rd where rd.by = w.id),
+             (select max(c.inspected_at) from public.unit_checks c where c.inspected_by = w.id),
+             (select max(r.requested_at) from public.stage_requests r where r.requested_by = w.id))
+  from who w
+$$;
+revoke execute on function public.tech_performance(date, date) from public, anon;
+grant execute on function public.tech_performance(date, date) to authenticated;
+
+-- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:
 --   update public.profiles set role = 'admin'
 --   where id = (select id from auth.users where email = 'you@example.com');
