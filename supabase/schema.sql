@@ -320,6 +320,10 @@ create or replace function public.write_audit()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare d jsonb;
 begin
+  -- تعديل لم يغيّر شيئاً (عدا ختم الوقت) لا يُسجَّل، حتى لا يتضخّم السجل
+  if tg_op = 'UPDATE' and (to_jsonb(old) - array['updated_at', 'updated_by']) = (to_jsonb(new) - array['updated_at', 'updated_by']) then
+    return null;
+  end if;
   d := case when tg_op = 'DELETE' then to_jsonb(old) else to_jsonb(new) end;
   insert into public.audit_log (actor, table_name, row_id, action, old_data, new_data)
   values (auth.uid(), tg_table_name, coalesce(d ->> 'id', d ->> 'unit_id', d ->> 'project_id'), tg_op,
@@ -999,6 +1003,25 @@ end $$;
 revoke execute on function public.protect_last_admin() from public, anon;
 drop trigger if exists profiles_last_admin on public.profiles;
 create trigger profiles_last_admin before update on public.profiles for each row execute function public.protect_last_admin();
+
+-- ==========================================================
+-- استيراد Excel بدفعات: تحديث نتائج كثيرة بطلب واحد
+-- security invoker: قواعد الصلاحيات (RLS) والمشغّلات (الختم وسجل العمليات) تبقى سارية كما في التحديث العادي
+-- ==========================================================
+create or replace function public.set_unit_checks(p_rows jsonb)
+returns integer language sql security invoker set search_path = '' as $$
+  with r as (
+    select (x ->> 'unit_id')::uuid as unit_id, x ->> 'checkpoint' as checkpoint, x ->> 'result' as result
+    from jsonb_array_elements(p_rows) as x
+  ), u as (
+    update public.unit_checks c set result = r.result
+    from r where c.unit_id = r.unit_id and c.checkpoint = r.checkpoint and c.result is distinct from r.result
+    returning 1
+  )
+  select count(*)::integer from u
+$$;
+revoke execute on function public.set_unit_checks(jsonb) from public, anon;
+grant execute on function public.set_unit_checks(jsonb) to authenticated;
 
 -- ==========================================================
 -- مهام المشروع (فكرة من TaskFlow): مهمة لها عنوان ومسؤول (فني) وموعد وأولوية،

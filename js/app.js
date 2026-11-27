@@ -136,7 +136,12 @@
     if (!ok || !window.supabase) return renderSetupNeeded();
     state.sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } });
     state.sb.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') { Object.assign(state, { user: null, profile: null, projects: [], data: {} }); render(); }
+      if (event === 'SIGNED_OUT') {
+        // لا يبقى شيء من بيانات المستخدم السابق لمن يدخل بعده على نفس الجهاز
+        for (const k of Object.keys(state)) if (k.startsWith('_')) delete state[k];
+        Object.assign(state, { user: null, profile: null, projects: [], data: {}, stages: {}, crews: [], crewUnits: [], requests: [], people: {}, tasks: [], taskReqs: [], staffList: [], tasksReady: false, notes: [], notesReady: false });
+        render();
+      }
       else if (event === 'SIGNED_IN' && session && session.user.id !== state.user?.id) setTimeout(() => startSession(session.user), 0);
     });
     const { data } = await state.sb.auth.getSession();
@@ -150,9 +155,21 @@
     state.profile = data;
     if (data && data.active) {
       clear(root).appendChild(h('div', { class: 'loading' }, 'جارٍ التحميل…'));
-      try { await loadBase(); } catch (e) { fail(e); }
+      try { await loadBase(); state._loadError = null; } catch (e) { state._loadError = e; }
     }
     render();
+  }
+
+  // تعذّر التحميل (انقطاع الإنترنت مثلاً): شاشة "أعد المحاولة" بدل صفحة فارغة توحي بأن لا مشاريع
+  function viewLoadError() {
+    const retry = h('button', { type: 'button', class: 'btn primary big', onClick: async () => {
+      retry.disabled = true; retry.textContent = 'جارٍ التحميل…';
+      try { await loadBase(); state._loadError = null; } catch (e) { state._loadError = e; }
+      render();
+    } }, 'أعد المحاولة');
+    return h('div', { class: 'auth' }, h('div', { class: 'auth-card load-err' }, h('div', { class: 'le-ic', 'aria-hidden': 'true' }, '📡'),
+      h('h1', null, 'تعذّر تحميل البيانات'), h('p', { class: 'muted' }, errText(state._loadError) + '. تأكد من الاتصال ثم أعد المحاولة.'), retry,
+      h('button', { type: 'button', class: 'btn ghost', onClick: signOut }, 'خروج')));
   }
 
   /* ---------- التوجيه ---------- */
@@ -169,6 +186,7 @@
     if (!state.sb) return renderSetupNeeded();
     if (!state.user) return root.appendChild(viewLogin());
     if (!state.profile || !state.profile.active) return root.appendChild(viewInactive());
+    if (state._loadError) return root.appendChild(viewLoadError());
 
     const r = parseRoute();
     // مشروع واحد فقط؟ افتحه مباشرة مثل فتح ملف Excel
@@ -183,6 +201,9 @@
     // صفحة جديدة تبدأ من الأعلى (لا تبقى بمكان التمرير السابق)
     if (entering) window.scrollTo(0, 0);
     const main = h('main', { class: 'main' });
+    // كتابة لم تُحفظ بعد: تمنع إعادة الرسم التلقائية (مثل تدوير الهاتف)
+    state._dirty = false;
+    main.addEventListener('input', () => { state._dirty = true; });
     root.appendChild(h('div', { class: 'app app-side' }, ...topbar(r).filter(Boolean), main));
     const done = (n) => { clear(main).appendChild(n); if (entering) { main.classList.add('enter'); countUp(main); } };
     const out = v.render(r);
@@ -768,7 +789,7 @@
       const clearBtn = h('button', { type: 'button', class: 'btn ghost sm', onClick: reset }, 'مسح التصفية');
       draw();
       // "/" يركّز البحث (مثل أغلب التطبيقات)
-      const onKey = (e) => { if (e.key === '/' && !/input|textarea|select/i.test(document.activeElement?.tagName || '')) { e.preventDefault(); search.focus(); } };
+      const onKey = (e) => { if (e.key === '/' && location.hash.startsWith('#/projects') && search.isConnected && !/input|textarea|select/i.test(document.activeElement?.tagName || '')) { e.preventDefault(); search.focus(); } };
       document.removeEventListener('keydown', state._plKey || (() => {})); state._plKey = onKey; document.addEventListener('keydown', onKey);
       return h('div', { class: 'stack plist' },
         h('div', { class: 'row between' }, h('h1', null, 'المشاريع'),
@@ -1018,7 +1039,7 @@
                 h('b', null, r.p.client),
                 h('span', { class: 'why' + (r.fails || r.open ? '' : ' alert') }, [r.fails ? `${r.fails} وحدة فيها فشل` : '', r.alerts ? `${r.alerts} تنبيه تسلسل` : '', r.open ? `${r.open} NCR مفتوحة` : '', r.late ? `${r.late} متأخرة` : ''].filter(Boolean).join('، ')),
                 h('span', { class: 'nx' }, r.p.governorate || '')))))
-                : h('p', { class: 'calm' }, 'لا فشل ولا تنبيهات ولا NCR مفتوحة.')),
+                : h('p', { class: 'calm' }, '👌 كل شيء على ما يرام: لا فحص فاشل ولا تنبيهات ولا عدم مطابقة مفتوحة.')),
             h('section', { class: 'd2-brands' }, h('h2', null, 'حسب الماركة'),
               byBrand.length ? h('ul', { class: 'brand-list' }, byBrand.map((x) => h('li', null,
                 h('button', { type: 'button', onClick: () => { state._pf = { ...PF_DEFAULT, type: 'compound', brand: x.b }; go('projects'); } },
@@ -1241,17 +1262,17 @@
         const st = crewStats(c);
         const busy = st.ip || st.units.ip;
         return h('li', { class: 'crew-card ' + c.kind + (c.active ? '' : ' off') },
-          h('div', { class: 'cc-top' }, h('span', null, h('small', { class: 'kind-tag ' + c.kind }, KIND_AR[c.kind]), h('b', null, c.name)),
+          h('div', { class: 'cc-top' }, h('span', { class: 'cd-face cc-av ' + (st.ip ? 'busy' : '') }, initials(c.name)), h('span', { class: 'cc-name' }, h('small', { class: 'kind-tag ' + c.kind }, KIND_AR[c.kind]), h('b', null, c.name)),
             h('span', { class: 'chip ' + (busy ? 'st-in-progress' : '') }, !c.active ? 'غير فعّال' : busy ? 'يعمل الآن' : 'متاح')),
           c.leader || c.phone ? h('p', null, c.leader ? (c.kind === 'contractor' ? 'المسؤول: ' : 'الرئيس: ') + c.leader : '', c.leader && c.phone ? ' · ' : '',
             c.phone ? h('a', { href: 'tel:' + c.phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, c.phone) : null) : null,
           c.governorates?.length ? h('p', { class: 'cc-govs' }, c.governorates.join('، ')) : null,
           h('dl', { class: 'perf' },
-            h('div', null, h('dd', null, num(st.done)), h('dt', null, 'مرحلة مكتملة')),
-            h('div', null, h('dd', null, num(st.ip)), h('dt', null, 'جارية')),
-            h('div', null, h('dd', null, num(st.projects.size)), h('dt', null, 'مشروع')),
-            h('div', null, h('dd', null, st.avg === null ? '—' : num(Math.round(st.avg * 10) / 10)), h('dt', null, 'يوم للمرحلة')),
-            h('div', { class: st.afterDue ? 'bad' : '' }, h('dd', null, num(st.afterDue)), h('dt', null, 'بعد موعد التسليم'))),
+            h('div', null, h('dd', null, num(st.done)), h('dt', null, 'مراحل مكتملة')),
+            h('div', null, h('dd', null, num(st.ip)), h('dt', null, 'مراحل جارية')),
+            h('div', null, h('dd', null, num(st.projects.size)), h('dt', null, 'مشاريع')),
+            h('div', null, h('dd', null, st.avg === null ? '—' : num(Math.round(st.avg * 10) / 10)), h('dt', null, 'متوسط أيام المرحلة')),
+            h('div', { class: st.afterDue ? 'bad' : '' }, h('dd', null, num(st.afterDue)), h('dt', null, 'اكتملت بعد التسليم'))),
           st.at.length ? h('ul', { class: 'cc-at' }, st.at.map((w) => h('li', null, h('a', { href: '#/project/' + w.p.id }, w.p.client), ' · ' + cpN[w.x.checkpoint] + (w.x.crew ? ` · ${num(w.x.crew)} كادر` : '')))) : null,
           st.units.n ? h('div', { class: 'cc-units' }, h('h3', null, 'في المجمّعات'),
             h('dl', { class: 'perf' },
@@ -1337,16 +1358,16 @@
           h('thead', null, h('tr', null, h('th', null, 'الاسم'), h('th', null, 'الدور'), h('th', null, 'الفرقة'), h('th', null, 'مفعّل'), h('th', null, 'أُضيف'))),
           h('tbody', null, data.map((u) => {
             const me = u.id === state.user.id;
-            return h('tr', null,
-              h('td', null, h('input', { value: u.full_name, maxlength: 120, 'aria-label': 'الاسم', onChange: (e) => save(u, { full_name: e.target.value.trim() }) })),
-              h('td', null, h('select', { disabled: me, 'aria-label': 'الدور', onChange: (e) => save(u, { role: e.target.value }) },
+            return h('tr', { class: 'u-row' + (u.active ? '' : ' off') },
+              h('td', { class: 'u-name' }, h('span', { class: 'cd-face u-av', 'aria-hidden': 'true' }, initials(u.full_name)), h('input', { value: u.full_name, maxlength: 120, 'aria-label': 'الاسم', onChange: (e) => save(u, { full_name: e.target.value.trim() }) })),
+              h('td', { 'data-l': 'الدور' }, h('select', { disabled: me, 'aria-label': 'الدور', onChange: (e) => save(u, { role: e.target.value }) },
                 Object.entries(ROLES).map(([v, l]) => h('option', { value: v, selected: u.role === v }, l)))),
               // الفني يبلّغ عن مراحل فرقته فقط
-              h('td', null, h('select', { 'aria-label': 'الفرقة', onChange: (e) => save(u, { crew_id: e.target.value || null }) },
+              h('td', { 'data-l': 'الفرقة' }, h('select', { 'aria-label': 'الفرقة', onChange: (e) => save(u, { crew_id: e.target.value || null }) },
                 h('option', { value: '' }, 'بدون فرقة'),
                 state.crews.filter((c) => c.kind === 'internal' && (c.active || c.id === u.crew_id)).map((c) => h('option', { value: c.id, selected: u.crew_id === c.id }, c.name)))),
-              h('td', null, h('input', { type: 'checkbox', checked: u.active, disabled: me, 'aria-label': 'مفعّل', onChange: (e) => save(u, { active: e.target.checked }) })),
-              h('td', { dir: 'ltr' }, date(u.created_at)));
+              h('td', { 'data-l': 'مفعّل' }, h('input', { type: 'checkbox', checked: u.active, disabled: me, 'aria-label': 'مفعّل', onChange: (e) => save(u, { active: e.target.checked }) })),
+              h('td', { 'data-l': 'أُضيف' }, h('span', { dir: 'ltr' }, date(u.created_at))));
           }))))),
         h('section', { class: 'card' }, h('h2', null, 'الصلاحيات'), h('div', { class: 'table-wrap' }, h('table', { class: 'table compact' },
           h('thead', null, h('tr', null, h('th', null, ''), h('th', null, 'مدير'), h('th', null, 'مشرف'), h('th', null, 'فني'))),
