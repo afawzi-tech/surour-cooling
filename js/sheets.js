@@ -120,6 +120,9 @@
     const sp = A.stageProgress(p);
     const staff = A.isStaff();
     const total = S.checkpoints.length;
+    // ما تغيّر للتوّ (لحركة التأكيد) ثم يُنسى
+    const just = S._just && S._just.p === p.id ? S._just : null;
+    S._just = null;
     const cur = sp.status === 'done' ? null : sp.cur;
     const nextAfter = (key) => sp.list.find((x) => x.c.position > S.checkpoints.find((c) => c.key === key).position && x.s.status === 'not_started');
 
@@ -129,14 +132,14 @@
       const nx = nextAfter(cur.c.key);
       const ok = await saveStage(p, cur.c.key, { status: 'done', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
       if (ok && nx) await saveStage(p, nx.c.key, { status: 'in_progress', crew: cur.s.crew ?? null, crew_id: cur.s.crew_id ?? null });
-      if (ok) toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل');
+      if (ok) { toast(nx ? `اكتملت "${cur.c.name_ar}" وبدأت "${nx.c.name_ar}"` : 'اكتملت كل المراحل'); S._just = { p: p.id, done: cur.c.key, start: nx?.c.key || null, pct: sp.pct }; }
       A.render();
     };
     const start = async (btn, crew, team) => {
       btn.disabled = true;
       const n = crew.value === '' ? null : Number(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { btn.disabled = false; return toast('عدد الكوادر من 0 إلى 500', 'error'); }
-      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n, crew_id: team.value || null })) toast(`بدأت مرحلة "${cur.c.name_ar}"`);
+      if (await saveStage(p, cur.c.key, { status: 'in_progress', crew: n, crew_id: team.value || null })) { toast(`بدأت مرحلة "${cur.c.name_ar}"`); S._just = { p: p.id, done: null, start: cur.c.key, pct: sp.pct }; }
       A.render();
     };
 
@@ -151,7 +154,7 @@
       const prevCrew = [...sp.list].reverse().find((x) => x.s.status === 'done' && x.s.crew_id)?.s.crew_id;
       const team = crewSelect(cur.s.crew_id || prevCrew || '');
       const crewName = A.crewOf(cur.s.crew_id)?.name;
-      panel = h('section', { class: 'now-card ' + (ip ? 'ip' : 'ns') },
+      panel = h('section', { class: 'now-card ' + (ip ? 'ip' : 'ns') + (just?.start === cur.c.key ? ' just-start' : '') },
         h('span', { class: 'nc-tag' }, ip ? `المرحلة الحالية · ${num(cur.c.position)} من ${num(total)}` : `المرحلة التالية · ${num(cur.c.position)} من ${num(total)}`),
         h('h2', null, cur.c.name_ar),
         ip ? h('p', null, (cur.s.start_date ? `بدأت ${sinceText(cur.s.start_date)} (${cur.s.start_date})` : 'جارية') + (crewName ? ` · ${crewName}` : '') + (cur.s.crew ? ` · ${num(cur.s.crew)} كادر` : ''))
@@ -178,14 +181,14 @@
           h('small', null, [dates, A.crewOf(s.crew_id)?.name || '', s.crew ? `${num(s.crew)} كادر` : '', s.notes ? '📝 ' + s.notes : ''].filter(Boolean).join(' · ') || ' ')),
         h('span', { class: 'chip sp-st ' + ST_CLS[s.status] }, A.STAGE_AR[s.status])
       ];
-      return h('li', { class: `step ${ST_CLS[s.status]}${isCur ? ' cur' : ''}` },
+      return h('li', { class: `step ${ST_CLS[s.status]}${isCur ? ' cur' : ''}${just?.done === c.key ? ' just-done' : ''}${just?.start === c.key ? ' just-start' : ''}` },
         staff ? h('button', { type: 'button', class: 'sp-row', onClick: () => stageDialog(p, c), 'aria-label': `${c.name_ar}: ${A.STAGE_AR[s.status]}. تعديل` }, inner) : h('div', { class: 'sp-row' }, inner));
     }));
 
     return h('div', { class: 'stages' },
       h('section', { class: 'prog-head' },
-        h('div', { class: 'ph-pct' }, h('strong', null, A.pctText(sp.pct)), h('span', null, 'إنجاز المشروع')),
-        h('div', { class: 'ph-bar' }, h('div', { class: 'seg-bar', 'aria-hidden': 'true' }, sp.list.map(({ s }) => h('i', { class: ST_CLS[s.status] }))),
+        h('div', { class: 'ph-pct' }, just && just.pct !== sp.pct ? slidePct(just.pct, sp.pct) : h('strong', null, A.pctText(sp.pct)), h('span', null, 'إنجاز المشروع')),
+        h('div', { class: 'ph-bar' }, h('div', { class: 'seg-bar', 'aria-hidden': 'true' }, sp.list.map(({ c, s }, i) => h('i', { class: ST_CLS[s.status] + (just?.done === c.key ? ' just' : ''), style: { '--i': String(i) } }))),
           h('p', null, `${num(sp.done)} من ${num(sp.total)} مراحل مكتملة` + (sp.total < total ? ` (${num(total - sp.total)} لا تنطبق)` : '')))),
       panel || null,
       h('section', { class: 'steps-wrap' },
@@ -218,6 +221,21 @@
       toast(team.value ? `أُسندت ${num(keys.length)} مرحلة إلى ${A.crewOf(team.value)?.name}` : 'أُلغي الإسناد');
       A.render();
     } }]);
+  }
+
+  // نسبة الإنجاز تنتقل من قيمتها السابقة إلى الجديدة بعد إكمال مرحلة
+  function slidePct(from, to) {
+    const el = h('strong', null, A.pctText(to));
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return el;
+    el.textContent = A.pctText(from);
+    const t0 = performance.now(), D = 450;
+    const tick = (t) => {
+      const k = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - k, 3);
+      el.textContent = A.pctText(from + (to - from) * e);
+      if (k < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    return el;
   }
 
   // نافذة تعديل مرحلة

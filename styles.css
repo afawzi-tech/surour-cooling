@@ -972,3 +972,58 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 :root[data-theme="dark"] .kind2 button.on { background: #173A55; color: #8FD0F0; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kind2 button.on { background: #173A55; color: #8FD0F0; } }
 .cred { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--f-body); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; user-select: all; }
+
+/* ==========================================================
+   الحركة: هادئة وسريعة، وظيفتها توضيح ما تغيّر فقط
+   المدد: 120 (ضغط/تمرير) · 200 (ظهور) · 320 (تقدّم وتأكيد)
+   ========================================================== */
+:root {
+  --dur-1: 120ms; --dur-2: 200ms; --dur-3: 320ms;
+  --ease-out: cubic-bezier(.2, .8, .2, 1); --ease-std: cubic-bezier(.4, 0, .2, 1);
+}
+/* تغذية راجعة عند الضغط والمرور */
+.btn, .sp-row, .side-nav a, .mbar > a, .proj, .crew-card, .seg4 button, .st4 button, .kind2 button, .gov, .st-btn {
+  transition: background-color var(--dur-1) var(--ease-std), color var(--dur-1) var(--ease-std), border-color var(--dur-1) var(--ease-std), box-shadow var(--dur-1) var(--ease-std), transform var(--dur-1) var(--ease-std);
+}
+.btn:active:not(:disabled), .st4 button:active, .kind2 button:active, .mbar > a:active { transform: scale(.97); }
+.crew-card:hover { box-shadow: var(--shadow); }
+
+/* الانتقال بين الصفحات: فقط عند تغيّر الرابط، لا عند كل تحديث */
+@keyframes page-in { from { opacity: 0; transform: translateY(6px); } }
+.main.enter > * { animation: page-in var(--dur-2) var(--ease-out) both; }
+
+/* الأشرطة تمتلئ عند فتح الصفحة (من بداية السطر يميناً) */
+@keyframes grow-x { from { transform: scaleX(0); } }
+.main.enter .st-bar > span, .main.enter .db-fill, .main.enter .pbar > span {
+  transform-origin: right center; animation: grow-x 600ms var(--ease-out) both; animation-delay: 80ms;
+}
+.main.enter .seg-bar i { animation: page-in var(--dur-2) var(--ease-out) both; }
+.main.enter .seg-bar i:nth-child(n) { animation-delay: calc(var(--i, 0) * 25ms); }
+
+/* النوافذ */
+@keyframes dlg-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+@keyframes fade-in { from { opacity: 0; } }
+.dialog[open] { animation: dlg-in var(--dur-2) var(--ease-out); }
+.dialog[open]::backdrop { animation: fade-in var(--dur-2) var(--ease-out); }
+/* قائمة "المزيد" على الهاتف تطلع من جوة */
+@keyframes sheet-up { from { opacity: 0; transform: translateY(14px); } }
+.mb-more[open] .mb-sheet { animation: sheet-up var(--dur-2) var(--ease-out); }
+/* الرسائل القصيرة */
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
+.toast { animation: toast-in var(--dur-2) var(--ease-out); }
+
+/* إكمال مرحلة: علامة ✓ تظهر بنبضة، والمرحلة الجديدة تضوي لحظة */
+@keyframes dot-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+@keyframes ring-out { from { box-shadow: 0 0 0 0 rgb(52 160 208 / 55%); } to { box-shadow: 0 0 0 12px rgb(52 160 208 / 0%); } }
+@keyframes glow { from { background: var(--sky-soft, #E1F1FA); } }
+@keyframes seg-fill { from { transform: scaleX(0); } }
+.step.just-done .sp-dot { animation: dot-pop var(--dur-3) var(--ease-out), ring-out 700ms var(--ease-out); }
+.step.just-start .sp-row { animation: glow 900ms var(--ease-std); }
+.seg-bar i.just { transform-origin: right center; animation: seg-fill var(--dur-3) var(--ease-out); }
+.now-card.just-start { animation: page-in var(--dur-3) var(--ease-out); }
+.now-card.just-start h2 { animation: glow 900ms var(--ease-std); border-radius: 6px; }
+
+/* من يفضّل تقليل الحركة: لا حركة إطلاقاً، والمحتوى يظهر مباشرة */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after, .dialog[open]::backdrop { animation: none !important; transition: none !important; }
+}

@@ -251,13 +251,43 @@
     const title = typeof v.title === 'function' ? v.title(r) : v.title;
     document.title = title + ' | مصاعد السرور';
 
+    // حركة الدخول فقط عند تغيّر الصفحة، لا عند إعادة الرسم بعد حفظ أو تصفية
+    const entering = location.hash !== state._lastHash;
+    state._lastHash = location.hash;
     const main = h('main', { class: 'main' });
     root.appendChild(h('div', { class: 'app app-side' }, ...topbar(r).filter(Boolean), main));
+    const done = (n) => { clear(main).appendChild(n); if (entering) { main.classList.add('enter'); countUp(main); } };
     const out = v.render(r);
     if (out instanceof Promise) {
       main.appendChild(h('div', { class: 'loading' }, 'جارٍ التحميل…'));
-      out.then((n) => clear(main).appendChild(n), (e) => { fail(e); clear(main).appendChild(empty('تعذّر التحميل')); });
-    } else main.appendChild(out);
+      out.then(done, (e) => { fail(e); clear(main).appendChild(empty('تعذّر التحميل')); });
+    } else done(out);
+  }
+
+  // الأرقام الكبيرة تعدّ من الصفر إلى قيمتها (نصف ثانية) عند فتح الصفحة
+  const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function countUp(scope) {
+    if (reducedMotion()) return;
+    scope.querySelectorAll('.d2-stats dd, .d2-pct strong, .ph-pct strong, .perf dd').forEach((el) => {
+      const text = el.textContent;
+      const m = text.match(/^([0-9][0-9,]*)(\.([0-9]+))?(%?)$/);
+      if (!m) return;
+      const target = Number(m[1].replace(/,/g, '') + (m[2] || ''));
+      if (!target) return;
+      const dec = m[3] ? m[3].length : 0;
+      const fmt = (x) => (dec ? x.toFixed(dec) : num(Math.round(x))) + m[4];
+      const box = el.closest('dl, div') || el;
+      box.setAttribute('aria-busy', 'true');           // لا يُقرأ الرقم أثناء العدّ
+      const t0 = performance.now(), D = 500;
+      const tick = (t) => {
+        if (!el.isConnected) return;
+        const k = Math.min(1, (t - t0) / D), e = 1 - Math.pow(1 - k, 3);
+        el.textContent = k < 1 ? fmt(target * e) : text;
+        if (k < 1) requestAnimationFrame(tick); else box.removeAttribute('aria-busy');
+      };
+      el.textContent = fmt(0);
+      requestAnimationFrame(tick);
+    });
   }
 
   // القائمة الجانبية (يمين الشاشة) على الكمبيوتر، وشريط سفلي على الهاتف
@@ -476,7 +506,7 @@
 
     const lead = !rows.length ? 'لا توجد مشاريع بعد. أنشئ أول مشروع لتبدأ المتابعة.'
       : cntAr(rows.length, 'مشروع واحد', 'مشروعان', 'مشاريع', 'مشروعاً') + (govs ? ` في ${cntAr(govs, 'محافظة واحدة', 'محافظتين', 'محافظات', 'محافظة')}` : '')
-        + `: ${num(by('in_progress'))} جارٍ و${num(by('done'))} مكتمل` + (rows.some(isLate) ? `، منها ${num(rows.filter(isLate).length)} ${rows.filter(isLate).length === 1 ? 'متأخر' : 'متأخرة'} عن موعده. ` : '. ')
+        + `: ${num(by('in_progress'))} جارٍ و${num(by('done'))} مكتمل` + (rows.some(isLate) ? `، منها ${num(rows.filter(isLate).length)} ${rows.filter(isLate).length === 1 ? 'متأخر عن موعده' : 'متأخرة عن موعدها'}. ` : '. ')
         + (attn.length ? (attn.length === 1 ? 'مشروع واحد يحتاج انتباهك.' : `${num(attn.length)} مشاريع تحتاج انتباهك.`) : 'لا شيء يحتاج انتباهك الآن.');
 
     // خريطة المحافظات: متوسط إنجاز مشاريع كل محافظة
