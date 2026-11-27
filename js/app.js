@@ -389,11 +389,13 @@
     return [
       h('aside', { class: 'side', 'aria-label': 'القائمة الرئيسية' },
         h('a', { href: '#/home', class: 'side-logo', onClick: stay('home') }, logo(), h('span', null, 'متابعة المشاريع')),
+        window.Collab ? window.Collab.bell('side-bell') : null,
         window.Insights ? h('button', { type: 'button', class: 'side-search', onClick: () => window.Insights.search() }, icon('search'), h('span', null, 'بحث'), h('kbd', { dir: 'ltr' }, 'Ctrl K')) : null,
         h('nav', { class: 'side-nav' }, menu.map(link)),
         p ? h('div', { class: 'side-proj' }, h('small', null, 'المشروع المفتوح'), h('a', { href: '#/project/' + p.id }, p.client)) : null,
         me),
       h('header', { class: 'mtop' }, h('a', { href: '#/home', onClick: stay('home') }, logo()), p ? h('span', { class: 'mtop-crumb' }, p.client) : null,
+        window.Collab ? window.Collab.bell('mtop-bell') : null,
         window.Insights ? h('button', { type: 'button', class: 'mtop-search', 'aria-label': 'بحث', onClick: () => window.Insights.search() }, icon('search')) : null),
       // في صفحات المجمّع يظهر شريط المجمّع السفلي بدل هذا
       p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 3).map(link), more)

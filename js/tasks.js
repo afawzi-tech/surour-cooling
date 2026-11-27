@@ -172,6 +172,7 @@
           r.review_note ? h('p', { class: 'small muted' }, 'ملاحظة المراجعة: ' + r.review_note) : null,
           r.photo_path ? R().photoEl(r.photo_path, 'rq-photo sm') : null)))));
     }
+    if (window.Collab) body.push(h('section', { class: 'tk-cm' }, h('h3', null, 'التعليقات'), window.Collab.thread(t.project_id, t.id)));
     A.modal(t.title, h('div', { class: 'stack sm' }, body), actions);
   }
 

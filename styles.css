@@ -1339,3 +1339,60 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
   .tk-board { grid-template-columns: 1fr; }
   .tk-col { min-height: 0; }
 }
+
+/* ---------- الإشعارات ---------- */
+.side-bell { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 10px; margin: 10px 0 6px; border-radius: 10px; color: var(--text); text-decoration: none; font-family: var(--f-head); font-size: .92rem; }
+.side-bell:hover { background: var(--surface-2); }
+.side-bell span { flex: 1; }
+.mtop-bell { margin-inline-start: auto; width: 44px; height: 44px; display: grid; place-items: center; color: var(--text); position: relative; flex: none; }
+.mtop-bell + .mtop-search { margin-inline-start: 0; }
+.nt-badge { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--danger); color: #fff; font-size: .72rem; font-weight: 800; display: inline-grid; place-items: center; font-family: var(--f-body); }
+.nt-badge[hidden] { display: none; }
+.mtop-bell .nt-badge { position: absolute; top: 4px; inset-inline-end: 2px; min-width: 18px; height: 18px; font-size: .66rem; }
+.nt-page { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+.nt-push { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px; background: var(--brand-soft); border: 1px solid var(--line); }
+.nt-push p { margin: 2px 0 0; }
+.nt-push.st-on { background: var(--surface-2); }
+.nt-push.st-denied, .nt-push.st-unsupported { background: var(--doing-soft); }
+.nt-list { list-style: none; margin: 0; padding: 0; }
+.nt-list li + li { border-top: 1px solid var(--line); }
+.nt-list a { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 12px 6px; color: var(--text); text-decoration: none; min-height: 44px; }
+.nt-list a:hover { background: var(--surface-2); }
+.nt-list li.new a { background: color-mix(in srgb, var(--brand-soft) 60%, transparent); }
+.nt-list li.new b::after { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-inline-start: 8px; vertical-align: middle; }
+.nt-ico { font-size: 1.15rem; line-height: 1.4; text-align: center; }
+.nt-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.nt-main span { color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }
+.nt-when { color: var(--muted); font-size: .78rem; white-space: nowrap; }
+.nt-list li.read { opacity: .8; }
+
+/* ---------- التعليقات ---------- */
+.cm-panel { max-width: 760px; display: flex; flex-direction: column; gap: 10px; }
+.cm-thread { display: flex; flex-direction: column; gap: 10px; }
+.cm-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.cm-list li { background: var(--surface-2); border-radius: 12px; padding: 8px 12px; max-width: 92%; }
+.cm-list li.me { align-self: flex-end; background: var(--brand-soft); }
+.cm-meta { display: flex; gap: 8px; align-items: baseline; font-size: .85rem; }
+.cm-meta small { color: var(--muted); }
+.cm-del { margin-inline-start: auto; color: var(--muted); background: none; border: 0; cursor: pointer; padding: 0; font: inherit; font-size: .78rem; }
+.cm-body { margin: 2px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.cm-at { background: none; color: var(--brand); font-weight: 700; }
+.cm-form { display: flex; flex-direction: column; gap: 6px; }
+.cm-input { width: 100%; resize: vertical; }
+.cm-actions { display: flex; justify-content: space-between; gap: 8px; }
+.cm-pick { max-width: 60%; min-height: 36px; }
+.tk-cm { border-top: 1px solid var(--line); padding-top: 10px; }
+.tk-cm h3 { margin: 0 0 8px; font-size: .95rem; }
+
+/* ---------- المرفقات ---------- */
+.fl-panel { max-width: 860px; }
+.fl-list { list-style: none; margin: 0; padding: 0; }
+.fl-list li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.fl-open { flex: 1; min-width: 200px; display: flex; gap: 10px; align-items: center; background: none; border: 0; padding: 6px 4px; text-align: start; color: var(--text); font: inherit; cursor: pointer; border-radius: 8px; min-height: 44px; }
+.fl-open:hover { background: var(--surface-2); }
+.fl-ico { font-size: 1.4rem; }
+.fl-main { display: flex; flex-direction: column; min-width: 0; }
+.fl-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-main small { color: var(--muted); font-size: .8rem; }
+.chip.fl-staff { background: var(--doing-soft); color: var(--doing); }
+.fl-act { display: flex; gap: 6px; }
