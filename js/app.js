@@ -317,6 +317,7 @@
     audit: ['M4 4h16v16H4z', 'M8 9h8', 'M8 13h8', 'M8 17h5'],
     backup: ['M12 3v12', 'M7 10l5 5 5-5', 'M4 19h16'],
     techs: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
+    reports: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M8 12l2.5 2.5L16 9', 'M8 18h8'],
     more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
   };
   function icon(k) {
@@ -335,6 +336,7 @@
       ['crews', 'الفرق والمقاولون', true],
       ['techs', isStaff() ? 'أداء الفنيين' : 'أدائي', true],
       ['compounds', 'المجمّعات السكنية', true],
+      ['reports', 'سجل التقارير', true],
       ['users', 'المستخدمون', isAdmin()],
       ['audit', 'سجل العمليات', isAdmin()],
       ['backup', 'نسخة احتياطية', isStaff()]
