@@ -1164,3 +1164,32 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 .rq-who { text-align: end; font-size: .9rem; }
 .rq-go { color: var(--ink-2); }
 @media (max-width: 760px) { .rq-row { grid-template-columns: auto minmax(0, 1fr) auto; } .rq-go { display: none; } }
+
+/* ---------- سجل التقارير ---------- */
+.rq-tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.rq-tab { flex: 0 0 auto; font: inherit; font-size: .9rem; cursor: pointer; padding: 6px 14px; min-height: 40px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); color: var(--muted); white-space: nowrap; }
+.rq-tab:hover { color: var(--text); }
+.rq-tab.on { background: var(--brand); border-color: var(--brand); color: var(--brand-ink); font-weight: 700; }
+.rq-tab.warn:not(.on) { color: var(--doing); border-color: color-mix(in srgb, var(--doing) 45%, transparent); font-weight: 700; }
+.rq-tab:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.rq-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; }
+.rq-card { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); border-inline-start: 4px solid var(--line); }
+.rq-card.rqc-pending { border-inline-start-color: var(--doing); }
+.rq-card.rqc-approved { border-inline-start-color: var(--done); }
+.rq-card.rqc-rejected { border-inline-start-color: var(--danger); }
+.rq-card .rq-photo { width: 120px; height: 120px; max-height: none; object-fit: cover; }
+.rq-card .rq-photo-btn { align-self: start; }
+.rq-card .rq-photo-wait { width: 120px; height: 120px; display: grid; place-items: center; text-align: center; background: var(--surface-2); border-radius: 10px; font-size: .75rem; }
+.rq-nophoto { width: 120px; height: 120px; display: grid; place-items: center; background: var(--surface-2); border-radius: 10px; font-size: 2rem; }
+.rq-body { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
+.rq-body p { margin: 0; }
+.rq-top { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 100%; justify-content: space-between; }
+.rq-title { font-size: 1rem; }
+.rq-proj { font-weight: 700; color: var(--brand); text-decoration: none; }
+.rq-proj:hover { text-decoration: underline; }
+.rq-note-s { font-size: .9rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chip.rq-st-chip.pending { background: var(--doing-soft); color: var(--doing); }
+.chip.rq-st-chip.approved { background: var(--done-soft); color: var(--done); }
+.chip.rq-st-chip.rejected { background: var(--danger-soft); color: var(--danger); }
+.rq-body .btn { margin-top: 4px; }
+@media (max-width: 760px) { .rq-card { grid-template-columns: 88px minmax(0, 1fr); } .rq-card .rq-photo, .rq-nophoto, .rq-card .rq-photo-wait { width: 88px; height: 88px; } }
