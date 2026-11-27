@@ -84,6 +84,7 @@
   // بطاقة العميل والمواعيد
   function clientCard(p, sp) {
     const sc = A.schedule(p, sp.pct, sp.status);
+    const fc = A.forecast(p, sp.pct, sp.status);
     const safeMap = p.map_url && /^https:\/\/[^\s<>"]+$/.test(p.map_url) ? p.map_url : null;
     const items = [
       p.customer_name ? ['العميل', p.customer_name] : null,
@@ -93,9 +94,11 @@
       p.start_date ? ['البدء المخطط', h('span', { dir: 'ltr' }, p.start_date)] : null,
       p.due_date ? ['التسليم', h('span', null, h('span', { dir: 'ltr' }, p.due_date), ' ', h('b', { class: 'due-tag' + (sc.late ? ' late' : sc.behind ? ' behind' : '') }, A.dueText(sc, sp.status)))] : null
     ].filter(Boolean);
-    if (!items.length) return A.isStaff() ? h('p', { class: 'client-empty muted small' }, 'لا توجد بيانات عميل أو مواعيد. ', h('a', { href: `#/project/${p.id}/settings` }, 'أضفها من "بيانات المشروع"')) : null;
+    if (!items.length && !fc) return A.isStaff() ? h('p', { class: 'client-empty muted small' }, 'لا توجد بيانات عميل أو مواعيد. ', h('a', { href: `#/project/${p.id}/settings` }, 'أضفها من "بيانات المشروع"')) : null;
     return h('section', { class: 'client-card' }, h('dl', null, items.map(([k, v]) => h('div', null, h('dt', null, k), h('dd', null, v)))),
-      sc.behind ? h('p', { class: 'behind-note' }, `متأخر عن الجدول: الإنجاز ${A.pctText(sp.pct)} والمتوقع حسب الوقت المنقضي ${A.pctText(sc.expected)}.`) : null);
+      sc.behind ? h('p', { class: 'behind-note' }, `متأخر عن الجدول: الإنجاز ${A.pctText(sp.pct)} والمتوقع حسب الوقت المنقضي ${A.pctText(sc.expected)}.`) : null,
+      fc ? h('p', { class: 'fc-note' + (fc.diff !== null && fc.diff < 0 ? ' late' : fc.diff > 0 ? ' early' : '') },
+        A.forecastText(fc) + '.', h('small', null, ` (${fc.actual ? 'من بدء العمل الفعلي' : 'من البدء المخطط'} ${fc.start}: ${A.daysAr(fc.elapsed)} لإنجاز ${A.pctText(sp.pct)})`)) : null);
   }
 
   async function saveStage(p, key, patch) {

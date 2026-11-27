@@ -209,6 +209,29 @@
   }
   const crewOf = (id) => state.crews.find((c) => c.id === id) || null;
 
+  /* ---------- التوقّع بالوتيرة الحالية ----------
+     إذا استمر المشروع بنفس سرعته منذ بدء العمل الفعلي (أول مرحلة بدأت، وإلا البدء المخطط)، متى ينتهي؟
+     المدة المتوقعة = الأيام المنقضية ÷ نسبة الإنجاز. الفرق عن التسليم: موجب = قبل الموعد، سالب = بعده. */
+  const addDays = (d, n) => new Date(new Date(d + 'T00:00:00Z').getTime() + n * DAY).toISOString().slice(0, 10);
+  const FC_MIN = 0.15;
+  function forecast(p, pct, status) {
+    if (status !== 'in_progress' || !(pct >= FC_MIN) || pct >= 1) return null;   // قبل 15% الوتيرة غير معبّرة بعد
+    const first = Object.values(state.stages[p.id] || {}).map((x) => x.start_date).filter(Boolean).sort()[0] || null;
+    const start = first || p.start_date;
+    const t = todayStr();
+    if (!start || start > t) return null;
+    const elapsed = dayDiff(t, start) + 1;
+    if (elapsed < 3) return null;                  // أقل من 3 أيام: الوتيرة غير معبّرة بعد
+    const end = addDays(start, Math.ceil(elapsed / pct) - 1);
+    return { start, end, elapsed, left: dayDiff(end, t), diff: p.due_date ? dayDiff(p.due_date, end) : null, actual: !!first };
+  }
+  function forecastText(fc, short) {
+    if (!fc) return '';
+    const vs = fc.diff === null ? '' : fc.diff > 0 ? `قبل الموعد بـ${daysAr(fc.diff)}` : fc.diff < 0 ? `بعد الموعد بـ${daysAr(-fc.diff)}` : 'في موعد التسليم';
+    if (short) return vs ? `التوقّع: ${vs}` : `التوقّع: ${fc.end}`;
+    return `بالوتيرة الحالية ينتهي حوالي ${fc.end}` + (vs ? `، ${vs}` : '');
+  }
+
   async function loadProject(id, force = false) {
     if (state.data[id] && !force) return state.data[id];
     const sb = state.sb;
@@ -318,6 +341,7 @@
     backup: ['M12 3v12', 'M7 10l5 5 5-5', 'M4 19h16'],
     techs: ['M4 20V10', 'M10 20V4', 'M16 20v-7', 'M22 20H2'],
     reports: ['M9 4h6v3H9z', 'M7 5H5v16h14V5h-2', 'M8 12l2.5 2.5L16 9', 'M8 18h8'],
+    calendar: ['M4 5h16v16H4z', 'M4 10h16', 'M8 3v4', 'M16 3v4', 'M8 14h2', 'M14 14h2', 'M8 18h2'],
     more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
   };
   function icon(k) {
@@ -334,6 +358,7 @@
       ['home', 'لوحة التحكم', true],
       ['projects', 'المشاريع', true],
       ['crews', 'الفرق والمقاولون', true],
+      ['calendar', 'تقويم المواعيد', true],
       ['techs', isStaff() ? 'أداء الفنيين' : 'أدائي', true],
       ['compounds', 'المجمّعات السكنية', true],
       ['reports', 'سجل التقارير', true],
@@ -342,7 +367,7 @@
       ['backup', 'نسخة احتياطية', isStaff()]
     ].filter((x) => x[2]);
     const stay = (k) => (k === 'home' ? () => { state._stayHome = true; } : null);
-    const SHORT = { home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات', techs: isStaff() ? 'الأداء' : 'أدائي' };
+    const SHORT = { calendar: 'المواعيد', home: 'اللوحة', crews: 'الفرق', compounds: 'المجمّعات', techs: isStaff() ? 'الأداء' : 'أدائي' };
     const link = ([k, l]) => h('a', { href: '#/' + k, class: navOn === k ? 'on' : '', 'aria-current': navOn === k ? 'page' : null, onClick: stay(k), 'aria-label': l }, icon(k),
       h('span', { class: 'nl-full' }, l), SHORT[k] ? h('span', { class: 'nl-short', 'aria-hidden': 'true' }, SHORT[k]) : null);
     const me = h('div', { class: 'side-me' },
@@ -472,7 +497,7 @@
       const why = [fails ? `${num(fails)} وحدة فيها فشل` : '', D.B8 ? `${num(D.B8)} تنبيه تسلسل` : '', D.B9 ? `${num(D.B9)} NCR مفتوحة` : '', late ? `${num(late)} متأخرة` : ''].filter(Boolean);
       const sc = schedule(p, D.B10, status);
       if (sc.late) why.unshift(`متأخر ${daysAr(-sc.daysLeft)} عن التسليم`); else if (sc.behind) why.unshift('متأخر عن الجدول');
-      return { p, pct: D.B10, status, why, flag: why[0] || '', bad: !!(fails || D.B9 || sc.late), compound: true, sc, due: dueText(sc, status),
+      return { p, pct: D.B10, status, why, flag: why[0] || '', bad: !!(fails || D.B9 || sc.late), compound: true, sc, due: dueText(sc, status), fc: forecast(p, D.B10, status),
         now: `${num(D.B3)} ${unitWords(p).one}، مكتملة ${num(D.B4)}، جارية ${num(D.B5)}`, curKey: null };
     }
     const sp = stageProgress(p);
@@ -483,7 +508,7 @@
     const now = sp.status === 'done' ? 'اكتملت كل المراحل' : sp.cur
       ? `${sp.cur.s.status === 'in_progress' ? 'الآن' : 'التالية'}: ${sp.cur.c.name_ar} (${num(sp.cur.c.position)} من ${num(state.checkpoints.length)})` : '—';
     const flag = sc.late ? `متأخر ${daysAr(-sc.daysLeft)}` : sc.behind ? 'متأخر عن الجدول' : why.length ? 'متوقف' : '';
-    return { p, pct: sp.pct, status: sp.status, why, flag, bad: sc.late, compound: false, now, curKey: sp.status === 'done' ? null : sp.cur?.c.key, sp, sc, due: dueText(sc, sp.status) };
+    return { p, pct: sp.pct, status: sp.status, why, flag, bad: sc.late, compound: false, now, fc: forecast(p, sp.pct, sp.status), curKey: sp.status === 'done' ? null : sp.cur?.c.key, sp, sc, due: dueText(sc, sp.status) };
   }
 
   async function home() {
@@ -501,10 +526,11 @@
 
     // المواعيد القادمة: المشاريع غير المكتملة بتاريخ تسليم، الأقرب أولاً
     const dues = rows.filter((r) => r.sc?.has && r.status !== 'done').sort((a, b) => a.sc.daysLeft - b.sc.daysLeft);
-    const duesBox = h('section', { class: 'd2-dues' }, h('h2', null, 'المواعيد القادمة'),
+    const duesBox = h('section', { class: 'd2-dues' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'المواعيد القادمة'),
+      h('a', { href: '#/calendar', class: 'link small' }, 'تقويم المواعيد')),
       dues.length ? h('ol', { class: 'due-list' }, dues.slice(0, 8).map((r) => h('li', { class: r.sc.late ? 'late' : r.sc.behind ? 'behind' : '' },
         h('a', { href: '#/project/' + r.p.id }, h('b', null, r.p.client), h('small', null, `التسليم ${r.sc.due}`)),
-        h('span', { class: 'due-when' }, r.due),
+        h('span', { class: 'due-when' }, r.due, r.fc && r.fc.diff !== null ? h('small', { class: 'due-fc' + (r.fc.diff < 0 ? ' late' : ''), title: forecastText(r.fc) }, forecastText(r.fc, true)) : null),
         h('span', { class: 'due-bar', title: r.sc.expected !== null ? `الإنجاز ${pctText(r.pct)}، المتوقع حسب الوقت ${pctText(r.sc.expected)}` : `الإنجاز ${pctText(r.pct)}` },
           h('span', { class: 'db-fill', style: { width: (r.pct * 100).toFixed(1) + '%' } }),
           r.sc.expected !== null ? h('i', { class: 'db-exp', style: { 'inset-inline-start': (r.sc.expected * 100).toFixed(1) + '%' } }) : null))))
@@ -591,7 +617,10 @@
 
     return h('div', { class: 'dash2 home' },
       h('header', { class: 'd2-head' },
-        h('p', { class: 'd2-lead' }, lead),
+        h('div', { class: 'd2-lead-box' }, h('p', { class: 'd2-lead' }, lead),
+          window.Plan && isStaff() && rows.length ? h('div', { class: 'row d2-lead-act' },
+            h('button', { type: 'button', class: 'btn sm', onClick: () => window.Plan.brief() }, 'ملخّص الصباح'),
+            h('a', { href: '#/calendar', class: 'btn ghost sm' }, 'تقويم المواعيد')) : null),
         h('div', { class: 'd2-pct' }, h('strong', null, pctText(avg)), h('span', null, 'متوسط إنجاز المشاريع'))),
       h('dl', { class: 'd2-stats' },
         stat('المشاريع', rows.length, '', ''), stat('جارية', by('in_progress'), '', 'in_progress'), stat('مكتملة', by('done'), 'ok', 'done'),
@@ -984,7 +1013,10 @@
 
       const out = h('div', { class: 'dash2 home' },
         h('header', { class: 'd2-head' },
-          h('p', { class: 'd2-lead' }, lead),
+          h('div', { class: 'd2-lead-box' }, h('p', { class: 'd2-lead' }, lead),
+          window.Plan && isStaff() && rows.length ? h('div', { class: 'row d2-lead-act' },
+            h('button', { type: 'button', class: 'btn sm', onClick: () => window.Plan.brief() }, 'ملخّص الصباح'),
+            h('a', { href: '#/calendar', class: 'btn ghost sm' }, 'تقويم المواعيد')) : null),
           h('div', { class: 'd2-pct' }, h('strong', null, pctText(overall)), h('span', null, scope === 'compounds' ? 'من فحوصات المجمّعات منجزة' : 'من فحوصات كل المشاريع منجزة'))),
         compBanner,
         h('dl', { class: 'd2-stats' }, [
@@ -1406,7 +1438,8 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText,
+    projInfo, forecast, forecastText, addDays, todayStr, dayDiff, STALL_DAYS, DAY };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));
