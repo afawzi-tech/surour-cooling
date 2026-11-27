@@ -525,6 +525,66 @@ drop policy if exists crews_delete on public.crews;
 create policy crews_delete on public.crews for delete to authenticated using (public.is_admin());
 
 -- ==========================================================
+-- فرقة وحدة المجمّع من قائمة الفرق (بدل النص الحر)
+-- حتى يُحسب شغل المجمّعات في أداء الفرق والمقاولين.
+-- عمود crew النصي القديم يبقى محفوظاً ولا تستعمله الواجهة.
+-- ==========================================================
+-- توحيد الاسم للمطابقة: أ إ آ ← ا، ة ← ه، ى ← ي، بدون تشكيل ومسافات زائدة (مثل البحث في الواجهة)
+create or replace function public.name_key(t text) returns text
+language sql immutable parallel safe set search_path = '' as $$
+  select btrim(regexp_replace(
+    translate(regexp_replace(lower(coalesce(t, '')), '[\u064B-\u065F\u0670\u0640]', '', 'g'), 'أإآٱةىؤئ', 'ااااهيوي'),
+    '\s+', ' ', 'g'))
+$$;
+
+do $$ begin
+  if not exists (select 1 from information_schema.columns
+                 where table_schema = 'public' and table_name = 'units' and column_name = 'crew_id') then
+    alter table public.units add column crew_id uuid references public.crews (id) on delete set null;
+    -- نقل لمرة واحدة: كل اسم غير موجود في القائمة تُنشأ له فرقة من الشركة، ثم تُربط الوحدات بالمطابق
+    insert into public.crews (name, kind)
+    select min(regexp_replace(btrim(u.crew), '\s+', ' ', 'g')), 'internal' from public.units u
+    where nullif(btrim(u.crew), '') is not null
+      and not exists (select 1 from public.crews c where public.name_key(c.name) = public.name_key(u.crew))
+    group by public.name_key(u.crew);
+    update public.units u set crew_id = c.id from public.crews c
+    where nullif(btrim(u.crew), '') is not null and public.name_key(c.name) = public.name_key(u.crew);
+  end if;
+end $$;
+create index if not exists units_crew_idx on public.units (crew_id);
+
+create or replace view public.unit_overview with (security_invoker = true) as
+select
+  u.id, u.project_id, u.code, u.zone, u.crew, u.remarks, u.position, u.created_at,
+  (select jsonb_object_agg(c.checkpoint, c.result) from public.unit_checks c where c.unit_id = u.id) as results,
+  u.crew_id
+from public.units u;
+
+-- أداء الفرق في المجمّعات: لكل فرقة ومشروع عدد الوحدات وحالتها (نفس معادلة Villa Tracker:
+-- فيها فشل إذا فشل أي بند، مكتملة إذا الناجح + لا ينطبق = كل البنود، لم تبدأ إذا لا ناجح)
+create or replace view public.crew_unit_stats with (security_invoker = true) as
+with k as (
+  select u.id, u.project_id, u.crew_id,
+    count(*) filter (where c.result = 'pass') as q,
+    count(*) filter (where c.result = 'fail') as r,
+    count(*) filter (where c.result = 'na')   as na,
+    max(c.inspected_at) as last_at
+  from public.units u left join public.unit_checks c on c.unit_id = u.id
+  where u.crew_id is not null
+  group by u.id
+), n as (select count(*) as total from public.qc_checkpoints)
+select k.crew_id, k.project_id,
+  count(*)::int                                                               as units,
+  count(*) filter (where k.r = 0 and k.q + k.na = n.total)::int               as done,
+  count(*) filter (where k.r > 0)::int                                        as failing,
+  count(*) filter (where k.r = 0 and k.q > 0 and k.q + k.na < n.total)::int   as in_progress,
+  max(k.last_at)                                                              as last_at
+from k cross join n
+group by k.crew_id, k.project_id;
+revoke all on public.crew_unit_stats from anon;
+grant select on public.crew_unit_stats to authenticated;
+
+-- ==========================================================
 -- بعد إنشاء أول مستخدم من لوحة Supabase، اجعله مديراً:
 --   update public.profiles set role = 'admin'
 --   where id = (select id from auth.users where email = 'you@example.com');

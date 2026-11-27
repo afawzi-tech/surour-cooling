@@ -1109,3 +1109,7 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 .d2-stats .st-btn:hover dt, .d2-stats .st-btn:focus-visible dt { color: var(--sky); }
 .d2-stats .st-btn:hover .st-go, .d2-stats .st-btn:focus-visible .st-go { opacity: 1; }
 .d2-stats .st.sel dt { text-decoration: none; }
+
+/* أداء الفرقة في المجمّعات */
+.cc-units { margin-top: 6px; }
+.cc-units h3 { margin: 4px 0 0; font-size: .8rem; color: var(--muted); font-weight: 700; }
