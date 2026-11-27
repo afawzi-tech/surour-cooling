@@ -52,7 +52,7 @@
       const body = { dashboard: sheetDashboard, tracker: sheetTracker, tests: sheetTests, ncr: sheetNcr, guide: sheetGuide }[tab](p, d);
       return h('div', { class: 'book' },
         h('div', { class: 'book-head' },
-          h('div', null, h('a', { href: A.isCompound(p) ? '#/compounds' : '#/home', class: 'link small back' }, A.isCompound(p) ? '→ المجمّعات السكنية' : '→ كل المشاريع'), h('h1', null, p.client)),
+          h('div', null, h('a', { href: A.isCompound(p) ? '#/compounds' : '#/projects', class: 'link small back' }, A.isCompound(p) ? '→ المجمّعات السكنية' : '→ كل المشاريع'), h('h1', null, p.client)),
           projectActions(p, d)),
         h('nav', { class: 'sheet-tabs', 'aria-label': 'أوراق المشروع' }, SHEETS.map(([k, ar, en]) =>
           h('a', { href: `#/project/${p.id}/${k}`, class: 'sheet-tab' + (k === tab ? ' on' : ''), title: en, 'aria-current': k === tab ? 'page' : null }, k === 'tracker' ? 'متابعة ' + W.theMany : ar))),
@@ -107,7 +107,7 @@
     const meta = [A.PTYPES[p.project_type], p.governorate, p.city, p.brand].filter(Boolean).join('، ');
     return h('div', { class: 'book stages-book' },
       h('div', { class: 'book-head' },
-        h('div', null, h('a', { href: '#/home', class: 'link small back' }, '→ كل المشاريع'), h('h1', null, p.client),
+        h('div', null, h('a', { href: '#/projects', class: 'link small back' }, '→ كل المشاريع'), h('h1', null, p.client),
           meta ? h('p', { class: 'muted small' }, meta) : null)),
       h('nav', { class: 'sheet-tabs', 'aria-label': 'أقسام المشروع' },
         [['stages', 'مراحل العمل'], ['settings', 'بيانات المشروع']].map(([k, l]) =>
