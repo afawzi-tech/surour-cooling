@@ -112,7 +112,8 @@
     }
   };
   const openNcrsOf = (d, unitId) => d.ncrs.filter((n) => n.unit_id === unitId && n.status === 'open').length;
-  const pctText = (x) => (Math.round((x || 0) * 1000) / 10) + '%';
+  // داخل عزل اتجاه (LRI…PDI) حتى لا تنقلب علامة % في الجمل العربية
+  const pctText = (x) => '\u2066' + (Math.round((x || 0) * 1000) / 10) + '%\u2069';
 
   /* ---------- الأخطاء ---------- */
   function errText(error) {
@@ -292,7 +293,7 @@
     if (reducedMotion()) return;
     scope.querySelectorAll('.d2-stats dd, .d2-pct strong, .ph-pct strong, .perf dd').forEach((el) => {
       const text = el.textContent;
-      const m = text.match(/^([0-9][0-9,]*)(\.([0-9]+))?(%?)$/);
+      const m = text.replace(/[\u2066-\u2069]/g, '').match(/^([0-9][0-9,]*)(\.([0-9]+))?(%?)$/);
       if (!m) return;
       const target = Number(m[1].replace(/,/g, '') + (m[2] || ''));
       if (!target) return;
@@ -356,7 +357,7 @@
         h('button', { class: 'btn ghost sm', type: 'button', onClick: toggleTheme, 'aria-label': 'تبديل المظهر' }, 'المظهر'),
         h('button', { class: 'btn ghost sm', type: 'button', onClick: changePassword }, 'كلمة المرور'),
         h('button', { class: 'btn ghost sm', type: 'button', onClick: signOut }, 'خروج')));
-    // الهاتف: المشاريع والمجمّعات والفرق، والباقي مع الخروج تحت "المزيد"
+    // الهاتف: اللوحة والمشاريع، زر + بالنص، الفرق، والباقي مع الخروج تحت "المزيد"
     const rest = menu.slice(3);
     const more = h('details', { class: 'mb-more' },
       h('summary', { class: rest.some(([k]) => k === navOn) ? 'on' : '' }, icon('more'), h('span', null, 'المزيد')),
@@ -372,8 +373,62 @@
         me),
       h('header', { class: 'mtop' }, h('a', { href: '#/home', onClick: stay('home') }, logo()), p ? h('span', { class: 'mtop-crumb' }, p.client) : null),
       // في صفحات المجمّع يظهر شريط المجمّع السفلي بدل هذا
-      p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 3).map(link), more)
+      p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 2).map(link),
+        h('button', { type: 'button', class: 'mbar-plus', 'aria-label': 'إضافة', onClick: plusSheet }, h('span', { 'aria-hidden': 'true' }, '+')),
+        link(menu[2]), more)
     ];
+  }
+
+  // زر + بالنص: أكثر ما يُنشأ أو يُبلَّغ عنه
+  function plusSheet() {
+    const item = (ico, title, sub, fn) => h('button', { type: 'button', class: 'sheet-item', onClick: () => { document.getElementById('dialog').close(); fn(); } },
+      h('span', { class: 'si-ic', 'aria-hidden': 'true' }, ico), h('span', null, h('b', null, title), h('small', null, sub)));
+    const items = [
+      isStaff() ? item('🏗️', 'مشروع جديد', 'بيت، عمارة، مبنى، أو مجمّع سكني', newProject) : null,
+      item('📷', 'تقرير مرحلة بصورة', isStaff() ? 'تقارير الفنيين والموافقة عليها' : 'بلّغ عن بدء أو إكمال مرحلة فرقتك', () => go(isStaff() ? 'reports' : 'home')),
+      item('🔎', 'بحث عن مشروع', 'بالاسم أو العميل أو الهاتف', () => { go('projects'); setTimeout(() => document.querySelector('.pl-search')?.focus(), 400); }),
+      isStaff() ? item('👷', 'فرقة أو مقاول', 'إضافة منفّذ جديد', () => go('crews')) : null
+    ];
+    modal('إضافة', h('div', { class: 'sheet-list' }, items), []);
+  }
+
+  // السحب للأسفل من أعلى الصفحة يعيد تحميل البيانات (مثل تطبيقات التواصل)
+  function pullToRefresh() {
+    let y0 = null, dy = 0;
+    const tip = h('div', { class: 'ptr', 'aria-hidden': 'true' }, h('span', null, '↻'));
+    document.body.appendChild(tip);
+    window.addEventListener('touchstart', (e) => { y0 = window.scrollY <= 0 && !document.getElementById('dialog').open ? e.touches[0].clientY : null; dy = 0; }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      if (y0 === null) return;
+      dy = Math.max(0, e.touches[0].clientY - y0);
+      tip.style.setProperty('--d', Math.min(dy, 110) + 'px');
+      tip.classList.toggle('on', dy > 10); tip.classList.toggle('ready', dy > 80);
+    }, { passive: true });
+    window.addEventListener('touchend', async () => {
+      if (y0 === null) return;
+      const go2 = dy > 80; y0 = null; dy = 0;
+      tip.classList.remove('ready');
+      if (!go2 || !state.user) { tip.classList.remove('on'); return; }
+      tip.classList.add('spin');
+      try { await loadBase(); state.data = {}; await window.Reports?.reload?.(); render(); toast('تم التحديث'); } catch (e) { fail(e); }
+      tip.classList.remove('spin', 'on');
+    });
+  }
+
+  // النوافذ على الهاتف تطلع من الأسفل؛ سحبها لتحت يسكّرها
+  function sheetDrag() {
+    const dlg = document.getElementById('dialog');
+    let y0 = null;
+    dlg.addEventListener('touchstart', (e) => {
+      const r = dlg.getBoundingClientRect();
+      y0 = window.innerWidth <= 760 && e.touches[0].clientY - r.top < 56 ? e.touches[0].clientY : null;
+    }, { passive: true });
+    dlg.addEventListener('touchmove', (e) => { if (y0 !== null) dlg.style.transform = `translateY(${Math.max(0, e.touches[0].clientY - y0)}px)`; }, { passive: true });
+    dlg.addEventListener('touchend', (e) => {
+      if (y0 === null) return;
+      const d = e.changedTouches[0].clientY - y0; y0 = null; dlg.style.transform = '';
+      if (d > 90) dlg.close();
+    });
   }
 
   function applyTheme() {
@@ -482,7 +537,7 @@
   }
 
   /* ---------- المشاريع ---------- */
-  views.home = { title: 'مشاريع سرور', render: () => home() };
+  views.home = { title: 'مشاريع سرور', render: () => homeFeed() };
   views.compounds = { title: 'المجمّعات السكنية', render: () => portfolio('compounds') };
 
   /* ---------- الرئيسية: كل مشاريع الشركة، كل مشروع سطر واحد بنسبة إنجازه ---------- */
@@ -516,6 +571,142 @@
       ? `${sp.cur.s.status === 'in_progress' ? 'الآن' : 'التالية'}: ${sp.cur.c.name_ar} (${num(sp.cur.c.position)} من ${num(state.checkpoints.length)})` : '—';
     const flag = sc.late ? `متأخر ${daysAr(-sc.daysLeft)}` : sc.behind ? 'متأخر عن الجدول' : why.length ? 'متوقف' : '';
     return { p, pct: sp.pct, status: sp.status, why, flag, bad: sc.late, compound: false, now, curKey: sp.status === 'done' ? null : sp.cur?.c.key, sp, sc, due: dueText(sc, sp.status) };
+  }
+
+  /* ==========================================================
+     الرئيسية بأسلوب تطبيقات التواصل: دوائر المشاريع فوق (مثل الستوري)،
+     ثم بطاقات كبيرة تُمرَّر: ما يحتاج انتباهك، اليوم، المواعيد، المراحل، الفرق.
+     كل رقم وكل دائرة يفتح القائمة أو المشروع.
+     ========================================================== */
+  const initials = (t) => String(t || '').trim().split(/\s+/).filter((w) => !/^(ال)?(مشروع|عمارة|بيت|دائرة|مجمع|مجمّع)$/.test(w)).slice(0, 2).map((w) => w.replace(/^ال/, '')[0] || '').join(' ') || '؟';
+  const telOf = (x) => String(x || '').replace(/[^0-9+]/g, '');
+  const ringStyle = (pct) => ({ '--p': String(Math.round((pct || 0) * 100)) });
+
+  async function homeFeed() {
+    await Promise.all(state.projects.filter(isCompound).map((p) => loadProject(p.id)));
+    const openList = (patch) => { state._pf = { ...PF_DEFAULT, ...patch }; go('projects'); };
+    const rows = state.projects.map(projInfo);
+    const by = (st) => rows.filter((r) => r.status === st).length;
+    const overdue = rows.filter((r) => r.sc?.late), behind = rows.filter((r) => r.sc?.behind && !r.sc?.late);
+    const attn = rows.filter((r) => r.why.length).sort((a, b) => (b.bad - a.bad) || (b.why.length - a.why.length));
+    const avg = rows.length ? rows.reduce((a, r) => a + r.pct, 0) / rows.length : 0;
+    const cpN = Object.fromEntries(state.checkpoints.map((c) => [c.key, c]));
+    const P = (n) => cntAr(n, 'مشروع واحد', 'مشروعان', 'مشاريع', 'مشروعاً');
+
+    // التحية والجملة
+    const hr = new Date().getHours();
+    const hello = (hr < 12 ? 'صباح الخير' : 'مساء الخير') + (state.profile?.full_name ? '، ' + state.profile.full_name.split(' ')[0] : '');
+    const lead = !rows.length ? 'لا توجد مشاريع بعد. اضغط + لإضافة أول مشروع.'
+      : [`${P(rows.length)}: ${[[by('in_progress'), 'جارٍ', 'جارية'], [by('done'), 'مكتمل', 'مكتملة'], [by('not_started'), 'لم يبدأ', 'لم تبدأ']]
+          .filter(([n]) => n).map(([n, one, many]) => (n === 1 ? `واحد ${one}` : `${num(n)} ${many}`)).join('، و')}.`,
+        overdue.length ? ` ${overdue.length === 1 ? 'مشروع واحد فات موعد تسليمه' : `${P(overdue.length)} فات موعد تسليمها`}.` : '',
+        behind.length ? ` ${behind.length === 1 ? 'وواحد متأخر عن الجدول' : `و${num(behind.length)} متأخرة عن الجدول`}.` : '',
+        !overdue.length && !behind.length ? ' كل المواعيد على ما يرام.' : ''].join('');
+
+    // ---- دوائر المشاريع (مثل الستوري): الجارية أولاً، والمتأخرة بحلقة حمراء
+    const storyRows = rows.filter((r) => r.status !== 'done').sort((a, b) => (b.bad - a.bad) || (b.why.length - a.why.length) || ({ in_progress: 0, not_started: 1 }[a.status] - { in_progress: 0, not_started: 1 }[b.status]));
+    const story = (r) => h('a', { href: '#/project/' + r.p.id, class: 'story ' + (r.sc?.late || r.bad ? 'late' : r.sc?.behind || r.why.length ? 'warn' : r.status), title: `${r.p.client} · ${pctText(r.pct)}` },
+      h('span', { class: 'st-ring', style: ringStyle(r.pct) }, h('span', { class: 'st-face' }, h('b', null, initials(r.p.client)), h('small', null, pctText(r.pct)))),
+      h('span', { class: 'st-name' }, r.p.client));
+    const stories = h('div', { class: 'stories', role: 'list', 'aria-label': 'المشاريع الجارية' },
+      isStaff() ? h('button', { type: 'button', class: 'story add', onClick: newProject, role: 'listitem' },
+        h('span', { class: 'st-ring' }, h('span', { class: 'st-face' }, h('b', { 'aria-hidden': 'true' }, '+'))), h('span', { class: 'st-name' }, 'مشروع جديد')) : null,
+      storyRows.slice(0, 30).map((r) => { const el = story(r); el.setAttribute('role', 'listitem'); return el; }),
+      rows.length > storyRows.length ? h('a', { href: '#/projects', class: 'story more', role: 'listitem', onClick: () => { state._pf = { ...PF_DEFAULT, st: 'done' }; } },
+        h('span', { class: 'st-ring', style: ringStyle(1) }, h('span', { class: 'st-face' }, h('b', null, '✓'), h('small', null, num(rows.length - storyRows.length)))), h('span', { class: 'st-name' }, 'المكتملة')) : null);
+
+    // ---- الأرقام: شرائح تُمرَّر، كل واحدة تفتح القائمة
+    const chip = (label, n, cls, patch) => h('button', { type: 'button', class: 'stat-chip ' + cls, onClick: () => openList(patch) }, h('b', null, num(n)), h('span', null, label));
+    const stats = h('div', { class: 'stat-chips' },
+      chip('كل المشاريع', rows.length, '', {}), chip('جارية', by('in_progress'), 'run', { st: 'in_progress' }), chip('مكتملة', by('done'), 'ok', { st: 'done' }),
+      chip('لم تبدأ', by('not_started'), 'idle', { st: 'not_started' }), chip('فات موعدها', overdue.length, overdue.length ? 'bad' : 'zero', { st: 'overdue' }),
+      chip('متأخرة عن الجدول', behind.length, behind.length ? 'warn' : 'zero', { st: 'behind' }), chip('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'zero', { st: 'attn' }));
+
+    // ---- بطاقة مشروع يحتاج انتباهاً
+    const attnCard = (r) => {
+      const cur = r.sp?.cur && r.status !== 'done' ? r.sp.cur : null;
+      const crew = cur?.s.crew_id ? crewOf(cur.s.crew_id) : null;
+      return h('article', { class: 'fc pcard2 ' + (r.bad ? 'bad' : 'warn') },
+        h('a', { href: '#/project/' + r.p.id, class: 'pc-head' },
+          h('span', { class: 'st-ring sm', style: ringStyle(r.pct) }, h('span', { class: 'st-face' }, h('b', null, initials(r.p.client)))),
+          h('span', { class: 'pc-title' }, h('b', null, r.p.client), h('small', null, [r.compound ? PTYPES.compound : PTYPES[r.p.project_type], r.p.governorate].filter(Boolean).join(' · '))),
+          h('span', { class: 'pc-pct' }, pctText(r.pct))),
+        h('ul', { class: 'pc-why' }, r.why.map((w) => h('li', null, w))),
+        h('div', { class: 'pc-bar' }, h('span', { style: { width: (r.pct * 100).toFixed(1) + '%' } }),
+          r.sc?.expected != null ? h('i', { style: { 'inset-inline-start': (r.sc.expected * 100).toFixed(1) + '%' }, title: 'المتوقع حسب الوقت' }) : null),
+        h('p', { class: 'pc-now' }, r.now, crew ? ` · ${crew.name}` : ''),
+        h('div', { class: 'pc-acts' },
+          h('a', { href: '#/project/' + r.p.id, class: 'btn primary sm' }, 'فتح المشروع'),
+          crew?.phone ? h('a', { href: 'tel:' + telOf(crew.phone), class: 'btn sm' }, '📞 ' + crew.name) : null,
+          r.p.customer_phone ? h('a', { href: 'tel:' + telOf(r.p.customer_phone), class: 'btn sm ghost' }, '📞 العميل') : null));
+    };
+
+    // ---- اليوم: مراحل تحركت + تقارير الفنيين + فحوصات المجمّعات
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    const moved = [];
+    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.updated_at && new Date(x.updated_at) >= t0 && x.status !== 'not_started') moved.push({ p, x }); }));
+    moved.sort((a, b) => (a.x.updated_at < b.x.updated_at ? 1 : -1));
+    const verb = { in_progress: 'بدأت', done: 'اكتملت', na: 'لا تنطبق' };
+    const todayCard = h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'اليوم'), h('small', null, new Date().toLocaleDateString('ar-IQ', { weekday: 'long', day: 'numeric', month: 'long' }))),
+      moved.length ? h('ol', { class: 'feed-list' }, moved.slice(0, 12).map(({ p, x }) => h('li', null,
+        h('a', { href: '#/project/' + p.id, class: 'fl-row' },
+          h('span', { class: 'fl-ic ' + x.status, 'aria-hidden': 'true' }, x.status === 'done' ? '✓' : x.status === 'na' ? '—' : '▶'),
+          h('span', { class: 'fl-main' }, h('b', null, p.client), h('small', null, `${verb[x.status]} مرحلة ${cpN[x.checkpoint]?.name_ar || ''}` + (crewOf(x.crew_id) ? ` · ${crewOf(x.crew_id).name}` : ''))),
+          h('time', { dir: 'ltr' }, new Date(x.updated_at).toTimeString().slice(0, 5))))))
+        : h('p', { class: 'calm muted' }, 'لم تتحرّك أي مرحلة اليوم بعد.'),
+      rows.some((r) => r.compound) ? h('div', { class: 'fc-sub' }, h('h3', null, 'فحوصات المجمّعات اليوم'), todayActivity(state.projects.filter(isCompound).map((p) => p.id))) : null);
+
+    // ---- المواعيد القادمة
+    const dues = rows.filter((r) => r.sc?.has && r.status !== 'done').sort((a, b) => a.sc.daysLeft - b.sc.daysLeft);
+    const duesCard = h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'المواعيد القادمة')),
+      dues.length ? h('ol', { class: 'feed-list' }, dues.slice(0, 6).map((r) => h('li', null, h('a', { href: '#/project/' + r.p.id, class: 'fl-row' },
+        h('span', { class: 'day-pill ' + (r.sc.late ? 'bad' : r.sc.behind ? 'warn' : '') }, h('b', null, num(Math.abs(r.sc.daysLeft))), h('small', null, r.sc.late ? 'متأخر' : 'يوم')),
+        h('span', { class: 'fl-main' }, h('b', null, r.p.client), h('small', null, r.due)),
+        h('span', { class: 'mini-pct' }, pctText(r.pct))))))
+        : h('p', { class: 'calm muted' }, 'لا توجد مشاريع بتاريخ تسليم. أضفه من "بيانات المشروع".'));
+
+    // ---- أين تقف المشاريع: شرائح تُمرَّر
+    const plain = rows.filter((r) => !r.compound);
+    const pipe = h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'أين تقف المشاريع')),
+      h('div', { class: 'pipe2' }, state.checkpoints.map((c) => {
+        const here = plain.filter((r) => r.curKey === c.key);
+        return h('button', { type: 'button', class: 'pp2' + (here.length ? ' has' : ''), disabled: !here.length, title: here.map((x) => x.p.client).join('، '),
+          onClick: () => (here.length === 1 ? go('project/' + here[0].p.id) : openList({ q: '' })) },
+          h('small', null, num(c.position)), h('b', null, here.length ? num(here.length) : '·'), h('span', null, c.name_ar));
+      })));
+
+    // ---- الفرق والمقاولون: دوائر صغيرة، الملوّنة تعمل الآن
+    const working = new Set();
+    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.status === 'in_progress' && x.crew_id) working.add(x.crew_id); }));
+    const crews = state.crews.filter((c) => c.active).sort((a, b) => working.has(b.id) - working.has(a.id));
+    const crewsCard = crews.length ? h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'الفرق والمقاولون'),
+      h('small', null, `${num(crews.filter((c) => working.has(c.id)).length)} يعمل الآن`)),
+      h('div', { class: 'crew-row' }, crews.map((c) => h('a', { href: '#/crews', class: 'crew-dot ' + (working.has(c.id) ? 'busy' : '') + ' ' + c.kind },
+        h('span', { class: 'cd-face' }, initials(c.name)), h('span', { class: 'cd-name' }, c.name))))) : null;
+
+    // ---- حسب المحافظة والماركة: شرائح
+    const govs = [...new Set(rows.map((r) => r.p.governorate).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ar'));
+    const brands = [...new Set(rows.map((r) => r.p.brand).filter(Boolean))].sort();
+    const groupsCard = govs.length || brands.length ? h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'تصفّح')),
+      govs.length ? h('div', { class: 'tag-row' }, govs.map((g) => h('button', { type: 'button', class: 'tag', onClick: () => openList({ gov: g }) }, '📍 ' + g, h('small', null, num(rows.filter((r) => r.p.governorate === g).length))))) : null,
+      brands.length ? h('div', { class: 'tag-row' }, brands.map((b) => h('button', { type: 'button', class: 'tag', dir: 'auto', onClick: () => openList({ brand: b }) }, b, h('small', null, num(rows.filter((r) => r.p.brand === b).length))))) : null) : null;
+
+    const reqs = window.Reports ? window.Reports.homeBox() : null;
+    const main = h('div', { class: 'feed-main' },
+      attn.length ? h('section', { class: 'feed-sec' }, h('h2', { class: 'sec-t' }, 'تحتاج انتباهك'), attn.slice(0, 6).map(attnCard),
+        attn.length > 6 ? h('button', { type: 'button', class: 'btn block', onClick: () => openList({ st: 'attn' }) }, `عرض الكل (${num(attn.length)})`) : null)
+        : rows.length ? h('section', { class: 'fc calm-card' }, h('b', null, '👌 كل شيء على ما يرام'), h('p', { class: 'muted' }, 'لا مشاريع متأخرة أو متوقفة الآن.')) : null,
+      reqs ? h('div', { class: 'fc fc-wrap' }, reqs) : null,
+      todayCard);
+    const side = h('div', { class: 'feed-side' },
+      h('section', { class: 'fc avg-card' }, h('span', { class: 'st-ring lg', style: ringStyle(avg) }, h('span', { class: 'st-face' }, h('b', null, pctText(avg)))),
+        h('div', null, h('b', null, 'متوسط الإنجاز'), h('small', { class: 'muted' }, P(rows.length)))),
+      duesCard, pipe, crewsCard, groupsCard);
+
+    return h('div', { class: 'feed' },
+      h('header', { class: 'feed-hello' }, h('h1', null, hello), h('p', null, lead)),
+      stories, stats,
+      h('div', { class: 'feed-grid' }, main, side));
   }
 
   async function home() {
@@ -716,7 +907,7 @@
         }));
       };
       const hit = (r) => {
-        if (F0.st && (F0.st === 'late' ? !r.late : F0.st === 'attn' ? !r.why.length : r.status !== F0.st)) return false;
+        if (F0.st && (F0.st === 'late' ? !r.late : F0.st === 'overdue' ? !r.sc?.late : F0.st === 'behind' ? !(r.sc?.behind && !r.sc?.late) : F0.st === 'attn' ? !r.why.length : r.status !== F0.st)) return false;
         if (F0.gov && (F0.gov === '-' ? r.p.governorate : r.p.governorate !== F0.gov)) return false;
         if (F0.brand && (r.p.brand || 'غير محددة') !== F0.brand) return false;
         if (F0.type && (r.compound ? 'compound' : r.p.project_type) !== F0.type) return false;
@@ -782,7 +973,7 @@
       const search = h('input', { type: 'search', class: 'pl-search', value: F0.q, placeholder: 'ابحث باسم المشروع أو العميل أو الهاتف أو المحافظة أو المنفّذ…', 'aria-label': 'بحث في المشاريع', enterkeyhint: 'search',
         onInput: (e) => { F0.q = e.target.value; clearTimeout(search._t); search._t = setTimeout(draw, 120); } });
       const filters = [
-        sel('st', 'كل الحالات', [['in_progress', 'جارية'], ['not_started', 'لم تبدأ'], ['done', 'مكتملة'], ['late', 'متأخرة'], ['attn', 'تحتاج انتباهك']]),
+        sel('st', 'كل الحالات', [['in_progress', 'جارية'], ['not_started', 'لم تبدأ'], ['done', 'مكتملة'], ['overdue', 'فات موعدها'], ['behind', 'متأخرة عن الجدول'], ['late', 'كل المتأخرة'], ['attn', 'تحتاج انتباهك']]),
         sel('gov', 'كل المحافظات', [...GOVS.map(([g]) => [g, g]).sort((a, b) => a[0].localeCompare(b[0], 'ar')), ['-', 'بلا محافظة']]),
         sel('brand', 'كل الماركات', [...brands.map((b) => [b, b]), ...(rows.some((r) => !r.p.brand) ? [['غير محددة', 'غير محددة']] : [])]),
         sel('type', 'كل الأنواع', Object.entries(PTYPES)),
@@ -1491,5 +1682,5 @@
     loadProject, loadBase, loadCrewUnits, nameKey: norm, isAdmin, isStaff, MAP_URL, stageOf, stageProgress, STAGE_AR, cntAr, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
-  document.addEventListener('DOMContentLoaded', () => boot().catch(fail));
+  document.addEventListener('DOMContentLoaded', () => { pullToRefresh(); sheetDrag(); boot().catch(fail); });
 })();

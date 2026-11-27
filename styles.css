@@ -1210,3 +1210,180 @@ button.sp-row:focus-visible { outline: 2px solid var(--sky); }
 .bk-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .bk-list li:last-child { border-bottom: 0; }
 .bk-list li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* ==========================================================
+   الرئيسية بأسلوب تطبيقات التواصل (انستغرام/سناب/تيك توك)
+   دوائر المشاريع، بطاقات كبيرة، شرائح تُمرَّر، زر + بالنص، نوافذ من الأسفل
+   ========================================================== */
+:root { --r-card: 20px; --r-pill: 999px; --ring-ok: #34A0D0; --ring-warn: #F59E0B; --ring-bad: #E5484D; --ring-done: #1E8A50; --ring-track: #E6EDF2; }
+:root[data-theme="dark"] { --ring-track: #22323F; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ring-track: #22323F; } }
+
+.feed { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.feed-hello h1 { margin: 0; font-size: clamp(1.4rem, 3vw, 1.9rem); }
+.feed-hello p { margin: 4px 0 0; color: var(--muted); font-size: .98rem; line-height: 1.7; max-width: 70ch; }
+
+/* دوائر المشاريع */
+.stories { display: flex; gap: 14px; overflow-x: auto; padding: 4px 2px 10px; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.stories::-webkit-scrollbar { display: none; }
+.story { all: unset; box-sizing: border-box; flex: none; width: 76px; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; scroll-snap-align: start; text-decoration: none; color: var(--text); }
+.story:focus-visible .st-ring { outline: 3px solid var(--sky); outline-offset: 3px; }
+.st-ring { --p: 0; --c: var(--ring-ok); position: relative; display: grid; place-items: center; width: 70px; height: 70px; border-radius: 50%;
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), var(--ring-track) 0); transition: transform var(--dur-1) var(--ease-std); }
+.story:active .st-ring { transform: scale(.94); }
+.st-face { width: calc(100% - 8px); height: calc(100% - 8px); border-radius: 50%; display: grid; place-items: center; align-content: center; background: var(--surface); border: 2px solid var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line); text-align: center; line-height: 1.05; }
+.st-face b { font-family: var(--f-head); font-size: .95rem; color: var(--navy); }
+.st-face small { font-size: .66rem; color: var(--muted); font-variant-numeric: tabular-nums; margin-top: 2px; }
+:root[data-theme="dark"] .st-face b { color: var(--text); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .st-face b { color: var(--text); } }
+.story.warn .st-ring { --c: var(--ring-warn); }
+.story.late .st-ring { --c: var(--ring-bad); }
+.story.not_started .st-ring { --c: #9FB3C2; }
+.story.more .st-ring { --c: var(--ring-done); }
+.story.add .st-ring { background: linear-gradient(135deg, #34A0D0, #143656); }
+.story.add .st-face b { font-size: 1.9rem; font-weight: 400; color: var(--sky); }
+.st-name { width: 100%; font-size: .74rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.story.late .st-name { color: var(--ring-bad); font-weight: 700; }
+
+/* شرائح الأرقام */
+.stat-chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.stat-chips::-webkit-scrollbar { display: none; }
+.stat-chip { all: unset; box-sizing: border-box; flex: none; display: inline-flex; align-items: baseline; gap: 6px; min-height: 44px; padding: 8px 16px; border-radius: var(--r-pill);
+  background: var(--surface); border: 1px solid var(--line); cursor: pointer; font-size: .9rem; transition: background-color var(--dur-1) var(--ease-std), transform var(--dur-1); }
+.stat-chip b { font-family: var(--f-head); font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.stat-chip:active { transform: scale(.96); }
+.stat-chip:focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
+.stat-chip.run b { color: var(--sky); } .stat-chip.ok b { color: var(--done); } .stat-chip.idle b, .stat-chip.zero b { color: var(--muted); }
+.stat-chip.bad { background: color-mix(in srgb, var(--ring-bad) 12%, var(--surface)); border-color: color-mix(in srgb, var(--ring-bad) 40%, transparent); }
+.stat-chip.bad b { color: var(--ring-bad); }
+.stat-chip.warn { background: color-mix(in srgb, var(--ring-warn) 12%, var(--surface)); border-color: color-mix(in srgb, var(--ring-warn) 40%, transparent); }
+.stat-chip.warn b { color: #B45309; }
+:root[data-theme="dark"] .stat-chip.warn b { color: #FBBF24; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .stat-chip.warn b { color: #FBBF24; } }
+
+/* الشبكة: عمود البطاقات + عمود جانبي على الكمبيوتر */
+.feed-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+.feed-main, .feed-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.sec-t { font-size: 1.05rem; margin: 4px 4px 0; }
+.feed-sec { display: flex; flex-direction: column; gap: 12px; }
+
+/* البطاقة */
+.fc { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.fc-wrap { padding: 4px 16px; }
+.fc-wrap > section { margin: 0; border: 0; padding: 12px 0; }
+.fc-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.fc-h h2 { margin: 0; font-size: 1.02rem; }
+.fc-h small { color: var(--muted); }
+.fc-sub h3 { font-size: .9rem; margin: 6px 0; color: var(--muted); }
+.calm-card { align-items: center; text-align: center; padding: 22px; }
+.calm-card b { font-family: var(--f-head); font-size: 1.05rem; }
+.calm-card p { margin: 0; }
+
+/* بطاقة مشروع يحتاج انتباهاً */
+.pcard2 { border-inline-start: 5px solid var(--ring-warn); }
+.pcard2.bad { border-inline-start-color: var(--ring-bad); }
+.pc-head { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text); }
+.st-ring.sm { width: 48px; height: 48px; flex: none; }
+.st-ring.sm .st-face b { font-size: .78rem; }
+.pcard2.bad .st-ring { --c: var(--ring-bad); } .pcard2.warn .st-ring { --c: var(--ring-warn); }
+.pc-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.pc-title b { font-family: var(--f-head); font-size: 1.05rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-title small { color: var(--muted); }
+.pc-pct { font-family: var(--f-head); font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pc-why { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.pc-why li { padding: 4px 10px; border-radius: var(--r-pill); font-size: .82rem; font-weight: 600; background: color-mix(in srgb, var(--ring-warn) 14%, transparent); color: #92400E; }
+.pcard2.bad .pc-why li:first-child { background: color-mix(in srgb, var(--ring-bad) 14%, transparent); color: #B42318; }
+:root[data-theme="dark"] .pc-why li { color: #FCD34D; } :root[data-theme="dark"] .pcard2.bad .pc-why li:first-child { color: #FCA5A5; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pc-why li { color: #FCD34D; } :root:not([data-theme="light"]) .pcard2.bad .pc-why li:first-child { color: #FCA5A5; } }
+.pc-bar { position: relative; height: 8px; border-radius: 4px; background: var(--ring-track); }
+.pc-bar > span { position: absolute; inset-block: 0; inset-inline-start: 0; border-radius: 4px; background: var(--sky); transform-origin: right center; }
+.pcard2.bad .pc-bar > span { background: var(--ring-bad); }
+.pc-bar > i { position: absolute; top: -4px; bottom: -4px; width: 2px; background: var(--text); opacity: .6; }
+.pc-now { margin: 0; color: var(--muted); font-size: .9rem; }
+.pc-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.pc-acts .btn { min-height: 44px; display: inline-flex; align-items: center; border-radius: var(--r-pill); }
+
+/* قوائم داخل البطاقات */
+.feed-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fl-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); text-decoration: none; color: var(--text); min-height: 52px; }
+.feed-list li:last-child .fl-row { border-bottom: 0; }
+.fl-ic { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; font-size: .85rem; background: var(--surface-2); color: var(--sky); }
+.fl-ic.done { background: color-mix(in srgb, var(--ring-done) 15%, transparent); color: var(--ring-done); }
+.fl-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.fl-main b { font-family: var(--f-head); font-size: .95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-main small { color: var(--muted); font-size: .82rem; }
+.fl-row time { color: var(--muted); font-size: .8rem; }
+.day-pill { flex: none; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; align-content: center; background: var(--surface-2); line-height: 1; }
+.day-pill b { font-family: var(--f-head); font-size: 1.05rem; } .day-pill small { font-size: .62rem; color: var(--muted); }
+.day-pill.bad { background: color-mix(in srgb, var(--ring-bad) 14%, transparent); } .day-pill.bad b { color: var(--ring-bad); }
+.day-pill.warn { background: color-mix(in srgb, var(--ring-warn) 16%, transparent); } .day-pill.warn b { color: #B45309; }
+.mini-pct { font-family: var(--f-head); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* متوسط الإنجاز */
+.avg-card { flex-direction: row; align-items: center; gap: 16px; }
+.st-ring.lg { width: 88px; height: 88px; flex: none; }
+.st-ring.lg .st-face b { font-size: 1.05rem; }
+.avg-card > div { display: flex; flex-direction: column; }
+
+/* أين تقف المشاريع */
+.pipe2 { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.pp2 { all: unset; box-sizing: border-box; flex: none; width: 92px; min-height: 92px; padding: 10px 8px; border-radius: 16px; background: var(--surface-2); display: flex; flex-direction: column; gap: 2px; cursor: default; }
+.pp2.has { background: color-mix(in srgb, var(--sky) 14%, var(--surface)); cursor: pointer; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sky) 40%, transparent); }
+.pp2 small { color: var(--muted); font-size: .7rem; }
+.pp2 b { font-family: var(--f-head); font-size: 1.4rem; color: var(--muted); }
+.pp2.has b { color: var(--sky); }
+.pp2 span { font-size: .74rem; line-height: 1.3; }
+.pp2:focus-visible { outline: 2px solid var(--sky); }
+
+/* الفرق */
+.crew-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+.crew-dot { flex: none; width: 66px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-decoration: none; color: var(--text); }
+.cd-face { width: 54px; height: 54px; border-radius: 50%; display: grid; place-items: center; font-family: var(--f-head); font-size: .8rem; background: var(--surface-2); border: 3px solid var(--line); }
+.crew-dot.busy .cd-face { border-color: var(--sky); }
+.crew-dot.contractor .cd-face { background: color-mix(in srgb, #D9A441 18%, var(--surface)); }
+.cd-name { font-size: .7rem; width: 100%; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* شرائح التصفّح */
+.tag-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.tag { all: unset; box-sizing: border-box; display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 6px 14px; border-radius: var(--r-pill); background: var(--surface-2); cursor: pointer; font-size: .88rem; }
+.tag small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.tag:focus-visible { outline: 2px solid var(--sky); }
+
+/* زر + بالنص */
+.mbar-plus { all: unset; justify-self: center; align-self: center; width: 54px; height: 54px; margin-top: -22px; border-radius: 18px; display: grid; place-items: center; cursor: pointer;
+  background: linear-gradient(135deg, #34A0D0, #143656); color: #fff; font-size: 2rem; line-height: 1; box-shadow: 0 8px 20px rgb(20 54 86 / 30%); transition: transform var(--dur-1) var(--ease-std); }
+.mbar-plus:active { transform: scale(.92); }
+.mbar-plus:focus-visible { outline: 3px solid var(--sky); outline-offset: 3px; }
+.sheet-list { display: flex; flex-direction: column; gap: 6px; }
+.sheet-item { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 10px 12px; border-radius: 16px; cursor: pointer; }
+.sheet-item:hover, .sheet-item:focus-visible { background: var(--surface-2); }
+.sheet-item b { display: block; font-family: var(--f-head); }
+.sheet-item small { color: var(--muted); }
+.si-ic { flex: none; width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; font-size: 1.3rem; background: var(--surface-2); }
+
+/* السحب للتحديث */
+.ptr { --d: 0px; position: fixed; top: 8px; left: 50%; z-index: 60; width: 40px; height: 40px; margin-left: -20px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--surface); color: var(--sky); box-shadow: 0 4px 14px rgb(0 0 0 / 15%); font-size: 1.3rem; opacity: 0; pointer-events: none;
+  transform: translateY(calc(var(--d) * .6 - 50px)) rotate(calc(var(--d) * 3)); transition: opacity var(--dur-1); }
+.ptr.on { opacity: 1; }
+.ptr.ready span { color: var(--navy); font-weight: 800; }
+.ptr.spin { transform: translateY(16px); }
+.ptr.spin span { animation: ptr-spin .8s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 1000px) { .feed-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) {
+  .feed { gap: 12px; }
+  .feed-hello p { font-size: .92rem; }
+  .story { width: 70px; } .st-ring { width: 64px; height: 64px; }
+  .fc { border-radius: 18px; padding: 14px; }
+  .mbar { grid-template-columns: repeat(5, 1fr); align-items: end; }
+  /* النوافذ تطلع من الأسفل مع مقبض */
+  .dialog[open] { position: fixed; inset: auto 0 0 0; margin: 0; width: 100%; max-width: 100%; max-height: 90dvh; border-radius: 22px 22px 0 0; overflow: auto;
+    padding-bottom: env(safe-area-inset-bottom); animation: sheet-in var(--dur-3) var(--ease-out); transition: transform var(--dur-2) var(--ease-out); }
+  .dialog[open]::before { content: ''; position: sticky; top: 0; display: block; width: 44px; height: 5px; margin: 8px auto 0; border-radius: 3px; background: var(--line); z-index: 2; }
+  .dialog-body > .row.end:last-child { position: sticky; bottom: 0; background: var(--surface); padding: 10px 0 4px; margin-bottom: -6px; }
+}
+@keyframes sheet-in { from { transform: translateY(100%); } }
+@media (prefers-reduced-motion: reduce) { .ptr { transition: none; } }
