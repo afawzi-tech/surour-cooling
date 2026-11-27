@@ -374,10 +374,16 @@
         h('p', { class: 'd2-lead' }, lead),
         h('div', { class: 'd2-pct', 'aria-label': `نسبة إنجاز الفحص الكلية ${A.pctText(D.B10)}` },
           h('strong', null, A.pctText(D.B10)), h('span', null, 'من فحوصات المجمّع منجزة'))),
+      // كل رقم يفتح متابعة الوحدات مصفّاة عليه (وNCR تفتح سجل عدم المطابقة على المفتوحة)
       h('dl', { class: 'd2-stats' }, [
-        ['مكتملة', D.B4, 'ok'], ['جارية', D.B5, ''], ['لم تبدأ', D.B6, 'muted'],
-        ['فيها بند فاشل', D.B7, D.B7 ? 'bad' : 'muted'], ['تنبيهات تسلسل', D.B8, D.B8 ? 'warn' : 'muted'], ['NCR مفتوحة', D.B9, D.B9 ? 'bad' : 'muted']
-      ].map(([l, v, c]) => h('div', { class: 'st ' + c }, h('dd', null, num(v)), h('dt', null, l)))),
+        ['مكتملة', D.B4, 'ok', 'Complete'], ['جارية', D.B5, '', 'In progress'], ['لم تبدأ', D.B6, 'muted', 'Not started'],
+        ['فيها بند فاشل', D.B7, D.B7 ? 'bad' : 'muted', 'Has failure'], ['تنبيهات تسلسل', D.B8, D.B8 ? 'warn' : 'muted', 'alert'], ['NCR مفتوحة', D.B9, D.B9 ? 'bad' : 'muted', 'ncr']
+      ].map(([l, v, c, st]) => h('div', { class: 'st ' + c },
+        h('button', { type: 'button', class: 'st-btn', title: st === 'ncr' ? 'عرض NCR المفتوحة' : `عرض ${W.theMany}: ${l}`, onClick: () => {
+          if (st === 'ncr') { S._nf = { status: 'open' }; A.go(`project/${p.id}/ncr`); return; }
+          S._tf = { q: '', zone: '', crew: '', status: st, next: '', sort: 'code' };
+          A.go(`project/${p.id}/tracker`);
+        } }, h('dd', null, num(v)), h('dt', null, l, h('span', { class: 'st-go', 'aria-hidden': 'true' }, ' ←')))))),
       h('div', { class: 'd2-grid' },
         h('section', { class: 'd2-plan', 'aria-labelledby': 'plan-h' },
           h('div', { class: 'd2-plan-head' },
