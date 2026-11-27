@@ -501,6 +501,9 @@ create table if not exists public.crews (
   created_at  timestamptz not null default now()
 );
 alter table public.project_stages add column if not exists crew_id uuid references public.crews (id) on delete set null;
+-- نوع المنفّذ: فرقة من فنيي الشركة، أو مقاول تنفيذ نتابع عمله
+alter table public.crews add column if not exists kind text not null default 'internal' check (kind in ('internal', 'contractor'));
+alter table public.crews add column if not exists governorates text[] not null default '{}' check (cardinality(governorates) <= 18);
 
 drop trigger if exists audit_crews on public.crews;
 create trigger audit_crews after insert or update or delete on public.crews

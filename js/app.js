@@ -283,7 +283,7 @@
     const menu = [
       ['home', 'المشاريع', true],
       ['compounds', 'المجمّعات السكنية', true],
-      ['crews', 'الفرق', true],
+      ['crews', 'الفرق والمقاولون', true],
       ['users', 'المستخدمون', isAdmin()],
       ['audit', 'سجل العمليات', isAdmin()],
       ['backup', 'نسخة احتياطية', isStaff()]
@@ -462,17 +462,17 @@
     const crews = state.crews.filter((c) => c.active);
     const people = working.reduce((a, w) => a + (w.x.crew || 0), 0);
     const busy = crews.filter((c) => working.some((w) => w.x.crew_id === c.id));
-    const crewsBox = h('section', { class: 'd2-crews' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'الفرق'),
-      h('a', { href: '#/crews', class: 'link small' }, isStaff() ? 'إدارة الفرق' : 'كل الفرق')),
-      crews.length ? [h('p', { class: 'd2-note' }, `${num(busy.length)} تعمل، ${num(crews.length - busy.length)} متاحة` + (people ? `. ${num(people)} كادر في المراحل الجارية` : '')),
+    const crewsBox = h('section', { class: 'd2-crews' }, h('div', { class: 'd2-plan-head' }, h('h2', null, 'الفرق والمقاولون'),
+      h('a', { href: '#/crews', class: 'link small' }, 'الأداء والتفاصيل')),
+      crews.length ? [h('p', { class: 'd2-note' }, `${num(busy.length)} يعمل الآن، ${num(crews.length - busy.length)} متاح` + (people ? `. ${num(people)} كادر في المراحل الجارية` : '')),
         h('ul', { class: 'crew-list' }, [...busy, ...crews.filter((c) => !busy.includes(c))].map((c) => {
           const at = working.filter((w) => w.x.crew_id === c.id);
           return h('li', { class: at.length ? 'busy' : 'free' },
-            h('span', { class: 'cr-name' }, h('b', null, c.name), c.leader ? h('small', null, 'الرئيس: ' + c.leader) : null),
+            h('span', { class: 'cr-name' }, h('b', null, c.name), h('small', null, KIND_AR[c.kind] + (c.leader ? ' · ' + c.leader : ''))),
             h('span', { class: 'cr-where' }, at.length ? at.map((w) => h('a', { href: '#/project/' + w.p.id }, `${w.p.client} · ${cpN[w.x.checkpoint]}`)) : 'متاحة'),
             c.phone ? h('a', { class: 'cr-tel', href: 'tel:' + c.phone, dir: 'ltr' }, c.phone) : null);
         }))]
-        : h('p', { class: 'calm muted' }, isStaff() ? 'لا توجد فرق بعد. أضفها من "إدارة الفرق".' : 'لا توجد فرق بعد.'));
+        : h('p', { class: 'calm muted' }, isStaff() ? 'لا توجد فرق أو مقاولون بعد. أضفهم من صفحة "الفرق والمقاولون".' : 'لا توجد فرق أو مقاولون بعد.'));
 
     const lead = !rows.length ? 'لا توجد مشاريع بعد. أنشئ أول مشروع لتبدأ المتابعة.'
       : cntAr(rows.length, 'مشروع واحد', 'مشروعان', 'مشاريع', 'مشروعاً') + (govs ? ` في ${cntAr(govs, 'محافظة واحدة', 'محافظتين', 'محافظات', 'محافظة')}` : '')
@@ -512,7 +512,7 @@
     // نشاط اليوم: مراحل تحرّكت اليوم
     const t0 = new Date(); t0.setHours(0, 0, 0, 0);
     const moved = [];
-    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.updated_at && new Date(x.updated_at) >= t0) moved.push({ p, x }); }));
+    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.updated_at && new Date(x.updated_at) >= t0 && x.status !== 'not_started') moved.push({ p, x }); }));
     moved.sort((a, b) => (a.x.updated_at < b.x.updated_at ? 1 : -1));
     const cpName = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
     const verb = { in_progress: 'بدأت', done: 'اكتملت', not_started: 'أُعيدت إلى "لم تبدأ"', na: 'لا تنطبق' };
@@ -818,52 +818,98 @@
     } }]);
   }
 
-  /* ---------- الفرق ---------- */
+  /* ---------- المنفّذون: فرق الشركة والمقاولون ----------
+     الأداء يُحسب من مراحل المشاريع المسندة لكل منفّذ:
+     مكتملة، جارية، عدد المشاريع، متوسط مدة المرحلة (من البدء إلى الانتهاء)،
+     ومراحل اكتملت بعد تاريخ تسليم مشروعها. */
+  const KIND_AR = { internal: 'فرقة من الشركة', contractor: 'مقاول' };
+  function crewStats(c) {
+    const st = { done: 0, ip: 0, projects: new Set(), days: [], afterDue: 0, at: [] };
+    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => {
+      if (x.crew_id !== c.id) return;
+      if (x.status === 'done') {
+        st.done++; st.projects.add(p.id);
+        if (x.start_date && x.end_date) st.days.push(dayDiff(x.end_date, x.start_date) + 1);
+        if (p.due_date && x.end_date && x.end_date > p.due_date) st.afterDue++;
+      } else if (x.status === 'in_progress') { st.ip++; st.projects.add(p.id); st.at.push({ p, x }); }
+    }));
+    st.avg = st.days.length ? st.days.reduce((a, b) => a + b, 0) / st.days.length : null;
+    return st;
+  }
   views.crews = {
-    title: 'الفرق',
-    render() {
-      const working = {};
-      state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => {
-        if (x.status === 'in_progress' && x.crew_id) (working[x.crew_id] ||= []).push({ p, x });
-      }));
+    title: 'الفرق والمقاولون',
+    render(r) {
+      const tab = r.id === 'contractor' ? 'contractor' : r.id === 'internal' ? 'internal' : 'all';
       const cpN = Object.fromEntries(state.checkpoints.map((c) => [c.key, c.name_ar]));
-      const edit = (c = {}) => {
-        const el = { name: h('input', { maxlength: 80, value: c.name || '', placeholder: 'مثال: فرقة أبو علي' }),
+      const edit = (c = { kind: tab === 'contractor' ? 'contractor' : 'internal' }) => {
+        let kind = c.kind || 'internal';
+        const el = { name: h('input', { maxlength: 80, value: c.name || '' }),
           leader: h('input', { maxlength: 80, value: c.leader || '' }),
           phone: h('input', { type: 'tel', maxlength: 30, dir: 'ltr', inputmode: 'tel', value: c.phone || '' }),
           active: h('input', { type: 'checkbox', checked: c.active !== false }) };
-        modal(c.id ? 'تعديل الفرقة' : 'فرقة جديدة', h('div', { class: 'form-grid' }, field('اسم الفرقة', el.name, { wide: true }), field('رئيس الفرقة', el.leader), field('هاتف الرئيس', el.phone),
-          h('label', { class: 'check wide' }, el.active, ' الفرقة فعّالة (تظهر في الاختيار)')),
+        const govs = GOVS.map(([g]) => h('label', { class: 'check' }, h('input', { type: 'checkbox', value: g, checked: (c.governorates || []).includes(g) }), ' ' + g));
+        const labels = () => {
+          nameF.querySelector('label').textContent = kind === 'contractor' ? 'اسم المقاول أو شركته' : 'اسم الفرقة';
+          leaderF.querySelector('label').textContent = kind === 'contractor' ? 'المسؤول' : 'رئيس الفرقة';
+          el.name.placeholder = kind === 'contractor' ? 'مثال: شركة النور للمقاولات' : 'مثال: فرقة أبو علي';
+        };
+        const nameF = field('', el.name, { wide: true }), leaderF = field('', el.leader);
+        const seg = h('div', { class: 'seg4 kind2', role: 'radiogroup', 'aria-label': 'النوع' }, Object.entries(KIND_AR).map(([k, l]) =>
+          h('button', { type: 'button', role: 'radio', class: k === kind ? 'on' : '', 'aria-checked': String(k === kind), onClick: (e) => {
+            kind = k; seg.querySelectorAll('button').forEach((b) => { b.classList.remove('on'); b.setAttribute('aria-checked', 'false'); });
+            e.currentTarget.classList.add('on'); e.currentTarget.setAttribute('aria-checked', 'true'); labels();
+          } }, l)));
+        labels();
+        modal(c.id ? 'تعديل' : 'إضافة منفّذ', h('div', { class: 'stack sm' }, seg,
+          h('div', { class: 'form-grid' }, nameF, leaderF, field('الهاتف', el.phone),
+            h('fieldset', { class: 'govs wide' }, h('legend', null, 'المحافظات التي يعمل بها'), h('div', { class: 'gov-checks' }, govs)),
+            h('label', { class: 'check wide' }, el.active, ' فعّال (يظهر عند اختيار المنفّذ)'))),
         [{ label: 'حفظ', cls: 'primary', run: async () => {
-          const v = { name: el.name.value.trim(), leader: el.leader.value.trim() || null, phone: el.phone.value.trim() || null, active: el.active.checked };
-          if (!v.name) { toast('اكتب اسم الفرقة', 'error'); return false; }
+          const v = { kind, name: el.name.value.trim(), leader: el.leader.value.trim() || null, phone: el.phone.value.trim() || null, active: el.active.checked,
+            governorates: govs.map((x) => x.querySelector('input')).filter((i) => i.checked).map((i) => i.value) };
+          if (!v.name) { toast('اكتب الاسم', 'error'); return false; }
           if (v.phone && !/^[0-9+ ()-]{4,30}$/.test(v.phone)) { toast('رقم الهاتف أرقام فقط', 'error'); return false; }
-          const r = c.id ? await state.sb.from('crews').update(v).eq('id', c.id).select().maybeSingle() : await state.sb.from('crews').insert(v).select().single();
-          if (r.error || !r.data) { fail(r.error || 'permission denied'); return false; }
-          if (c.id) Object.assign(c, r.data); else state.crews.push(r.data);
+          const res = c.id ? await state.sb.from('crews').update(v).eq('id', c.id).select().maybeSingle() : await state.sb.from('crews').insert(v).select().single();
+          if (res.error || !res.data) { fail(res.error || 'permission denied'); return false; }
+          if (c.id) Object.assign(c, res.data); else state.crews.push(res.data);
           state.crews.sort((a, b) => a.name.localeCompare(b.name, 'ar'));
           toast('تم الحفظ'); render();
         } }]);
       };
       const del = async (c) => {
-        if (!await window.UI.confirmBox({ title: 'حذف الفرقة', body: `ستُحذف "${c.name}"، وتبقى المراحل المسندة لها بدون فرقة.`, okText: 'حذف', danger: true })) return;
-        const r = await state.sb.from('crews').delete().eq('id', c.id).select();
-        if (r.error || !r.data?.length) return fail(r.error || 'permission denied');
+        if (!await window.UI.confirmBox({ title: 'حذف', body: `سيُحذف "${c.name}"، وتبقى المراحل المسندة له بدون منفّذ. الأفضل إلغاء تفعيله بدل الحذف حتى يبقى سجل أدائه.`, okText: 'حذف', danger: true })) return;
+        const res = await state.sb.from('crews').delete().eq('id', c.id).select();
+        if (res.error || !res.data?.length) return fail(res.error || 'permission denied');
         state.crews = state.crews.filter((x) => x.id !== c.id); toast('تم الحذف'); render();
       };
+      const list = state.crews.filter((c) => tab === 'all' || c.kind === tab);
+      const n = (k) => state.crews.filter((c) => c.kind === k).length;
+      const card = (c) => {
+        const st = crewStats(c);
+        return h('li', { class: 'crew-card ' + c.kind + (c.active ? '' : ' off') },
+          h('div', { class: 'cc-top' }, h('span', null, h('small', { class: 'kind-tag ' + c.kind }, KIND_AR[c.kind]), h('b', null, c.name)),
+            h('span', { class: 'chip ' + (st.ip ? 'st-in-progress' : '') }, !c.active ? 'غير فعّال' : st.ip ? 'يعمل الآن' : 'متاح')),
+          c.leader || c.phone ? h('p', null, c.leader ? (c.kind === 'contractor' ? 'المسؤول: ' : 'الرئيس: ') + c.leader : '', c.leader && c.phone ? ' · ' : '',
+            c.phone ? h('a', { href: 'tel:' + c.phone.replace(/[^0-9+]/g, ''), dir: 'ltr' }, c.phone) : null) : null,
+          c.governorates?.length ? h('p', { class: 'cc-govs' }, c.governorates.join('، ')) : null,
+          h('dl', { class: 'perf' },
+            h('div', null, h('dd', null, num(st.done)), h('dt', null, 'مرحلة مكتملة')),
+            h('div', null, h('dd', null, num(st.ip)), h('dt', null, 'جارية')),
+            h('div', null, h('dd', null, num(st.projects.size)), h('dt', null, 'مشروع')),
+            h('div', null, h('dd', null, st.avg === null ? '—' : num(Math.round(st.avg * 10) / 10)), h('dt', null, 'يوم للمرحلة')),
+            h('div', { class: st.afterDue ? 'bad' : '' }, h('dd', null, num(st.afterDue)), h('dt', null, 'بعد موعد التسليم'))),
+          st.at.length ? h('ul', { class: 'cc-at' }, st.at.map((w) => h('li', null, h('a', { href: '#/project/' + w.p.id }, w.p.client), ' · ' + cpN[w.x.checkpoint] + (w.x.crew ? ` · ${num(w.x.crew)} كادر` : '')))) : null,
+          isStaff() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn sm', onClick: () => edit(c) }, 'تعديل'),
+            isAdmin() ? h('button', { type: 'button', class: 'btn sm ghost danger-text', onClick: () => del(c) }, 'حذف') : null) : null);
+      };
       return h('div', { class: 'stack crews-page' },
-        h('div', { class: 'row between' }, h('h1', null, 'الفرق'), isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: () => edit() }, '+ فرقة جديدة') : null),
-        h('p', { class: 'muted' }, 'كل مرحلة جارية تُسند لفرقة، فتعرف أين تعمل كل فرقة الآن. الفرقة غير الفعّالة لا تظهر في الاختيار.'),
-        state.crews.length ? h('ul', { class: 'crew-cards' }, state.crews.map((c) => {
-          const at = working[c.id] || [];
-          return h('li', { class: 'crew-card' + (c.active ? '' : ' off') },
-            h('div', { class: 'cc-top' }, h('b', null, c.name), h('span', { class: 'chip ' + (at.length ? 'st-in-progress' : '') }, !c.active ? 'غير فعّالة' : at.length ? 'تعمل الآن' : 'متاحة')),
-            c.leader ? h('p', null, 'الرئيس: ' + c.leader) : null,
-            c.phone ? h('p', null, h('a', { href: 'tel:' + c.phone, dir: 'ltr' }, c.phone)) : null,
-            at.length ? h('ul', { class: 'cc-at' }, at.map((w) => h('li', null, h('a', { href: '#/project/' + w.p.id }, w.p.client), ' · ' + cpN[w.x.checkpoint] + (w.x.crew ? ` · ${num(w.x.crew)} كادر` : '')))) : null,
-            isStaff() ? h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn sm', onClick: () => edit(c) }, 'تعديل'),
-              isAdmin() ? h('button', { type: 'button', class: 'btn sm ghost danger-text', onClick: () => del(c) }, 'حذف') : null) : null);
-        })) : empty('لا توجد فرق بعد', isStaff() ? 'أضف أول فرقة باسمها ورئيسها.' : 'يضيفها المدير أو المشرف.'));
+        h('div', { class: 'row between' }, h('h1', null, 'الفرق والمقاولون'), isStaff() ? h('button', { type: 'button', class: 'btn primary', onClick: () => edit() }, '+ إضافة') : null),
+        h('p', { class: 'muted' }, 'كل مرحلة في المشروع تُسند لمنفّذ: فرقة من فنيي الشركة أو مقاول تنفيذ. الأداء يُحسب من المراحل المسندة لكل منفّذ.'),
+        h('nav', { class: 'sheet-tabs' }, [['all', `الكل (${state.crews.length})`], ['internal', `فرق الشركة (${n('internal')})`], ['contractor', `المقاولون (${n('contractor')})`]].map(([k, l]) =>
+          h('a', { href: '#/crews' + (k === 'all' ? '' : '/' + k), class: 'sheet-tab' + (k === tab ? ' on' : ''), 'aria-current': k === tab ? 'page' : null }, l))),
+        list.length ? h('ul', { class: 'crew-cards' }, list.map(card))
+          : empty(tab === 'contractor' ? 'لا يوجد مقاولون بعد' : 'لا توجد فرق بعد', isStaff() ? 'أضف من زر "+ إضافة".' : 'يضيفها المدير أو المشرف.'),
+        h('p', { class: 'd2-note muted small' }, '"يوم للمرحلة" = متوسط الأيام من بدء المرحلة إلى انتهائها. "بعد موعد التسليم" = مراحل اكتملت بعد تاريخ تسليم مشروعها.'));
     }
   };
 
@@ -960,7 +1006,7 @@
   };
 
   window.App = { state, views, render, go, fail, errText, field, empty, modal, download, fetchAll,
-    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
+    loadProject, loadBase, isAdmin, isStaff, stageOf, stageProgress, STAGE_AR, schedule, dueText, daysAr, crewOf, KIND_AR, unitWords, projectFields, GOVS, PTYPES, isCompound, todayActivity, F, RES, RES_AR, STATUS_AR, openNcrsOf, pctText };
 
   applyTheme();
   document.addEventListener('DOMContentLoaded', () => boot().catch(fail));

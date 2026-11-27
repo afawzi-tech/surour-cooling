@@ -72,8 +72,9 @@
   // قائمة الفرق الفعّالة (مع الفرقة الحالية حتى لو أصبحت غير فعّالة)
   function crewSelect(cur) {
     const list = S.crews.filter((c) => c.active || c.id === cur);
-    return h('select', { class: 'crew-sel' }, h('option', { value: '' }, list.length ? 'بدون فرقة' : 'لا توجد فرق بعد'),
-      list.map((c) => h('option', { value: c.id, selected: c.id === cur }, c.name + (c.leader ? ` (${c.leader})` : ''))));
+    const grp = (k, label) => { const xs = list.filter((c) => c.kind === k); return xs.length ? h('optgroup', { label }, xs.map((c) => h('option', { value: c.id, selected: c.id === cur }, c.name + (c.leader ? ` (${c.leader})` : '')))) : null; };
+    return h('select', { class: 'crew-sel' }, h('option', { value: '' }, list.length ? 'بدون منفّذ' : 'لا توجد فرق أو مقاولون بعد'),
+      grp('internal', 'فرق الشركة'), grp('contractor', 'المقاولون'));
   }
 
   // بطاقة العميل والمواعيد
@@ -160,7 +161,7 @@
               h('button', { type: 'button', class: 'btn primary big', onClick: (e) => complete(e.currentTarget) }, '✓ اكتملت هذه المرحلة'),
               h('button', { type: 'button', class: 'btn ghost', onClick: () => stageDialog(p, cur.c) }, 'تعديل التفاصيل'))
           : h('div', { class: 'nc-actions' },
-              h('label', { class: 'crew-label' }, 'الفرقة', team),
+              h('label', { class: 'crew-label' }, 'المنفّذ', team),
               h('label', { class: 'crew-label' }, 'عدد الكوادر', crew),
               h('button', { type: 'button', class: 'btn primary big', onClick: (e) => start(e.currentTarget, crew, team) }, '▶ ابدأ المرحلة'),
               h('button', { type: 'button', class: 'btn ghost', onClick: async () => { await saveStage(p, cur.c.key, { status: 'na' }); A.render(); } }, 'لا تنطبق على هذا المشروع')))
@@ -187,7 +188,36 @@
         h('div', { class: 'ph-bar' }, h('div', { class: 'seg-bar', 'aria-hidden': 'true' }, sp.list.map(({ s }) => h('i', { class: ST_CLS[s.status] }))),
           h('p', null, `${num(sp.done)} من ${num(sp.total)} مراحل مكتملة` + (sp.total < total ? ` (${num(total - sp.total)} لا تنطبق)` : '')))),
       panel || null,
-      h('section', { class: 'steps-wrap' }, h('h2', null, 'كل المراحل'), staff ? h('p', { class: 'muted small' }, 'اضغط أي مرحلة لتعديل حالتها أو تواريخها أو عدد الكوادر أو الملاحظات.') : null, steps));
+      h('section', { class: 'steps-wrap' },
+        h('div', { class: 'row between' }, h('h2', null, 'كل المراحل'),
+          staff ? h('button', { type: 'button', class: 'btn sm', onClick: () => assignDialog(p) }, 'إسناد مراحل لمنفّذ') : null),
+        staff ? h('p', { class: 'muted small' }, 'اضغط أي مرحلة لتعديل حالتها أو تواريخها أو المنفّذ أو عدد الكوادر أو الملاحظات.') : null, steps));
+  }
+
+  // إسناد عدة مراحل (أو المشروع كله) لفرقة أو مقاول بضغطة
+  function assignDialog(p) {
+    const sp = A.stageProgress(p);
+    const open = sp.list.filter(({ s }) => s.status !== 'done' && s.status !== 'na');
+    const team = crewSelect('');
+    const boxes = open.map(({ c, s }) => h('label', { class: 'check as-row' }, h('input', { type: 'checkbox', value: c.key, checked: true }),
+      ` ${num(c.position)}. ${c.name_ar}`, h('small', { class: 'muted' }, s.crew_id ? ' (الحالي: ' + (A.crewOf(s.crew_id)?.name || '—') + ')' : '')));
+    const all = (v) => boxes.forEach((b) => { b.querySelector('input').checked = v; });
+    if (!open.length) return toast('كل المراحل مكتملة أو لا تنطبق', 'error');
+    A.modal('إسناد مراحل', h('div', { class: 'stack sm' },
+      A.field('المنفّذ', team, { hint: 'اختر "بدون منفّذ" لإلغاء الإسناد' }),
+      h('div', { class: 'row' }, h('b', null, 'المراحل'), h('button', { type: 'button', class: 'btn ghost sm', onClick: () => all(true) }, 'الكل'), h('button', { type: 'button', class: 'btn ghost sm', onClick: () => all(false) }, 'لا شيء')),
+      h('div', { class: 'as-list' }, boxes)),
+    [{ label: 'إسناد', cls: 'primary', run: async () => {
+      const keys = boxes.map((b) => b.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+      if (!keys.length) { toast('اختر مرحلة واحدة على الأقل', 'error'); return false; }
+      // نرسل الحالة الحالية مع المنفّذ حتى لا تتغيّر حالة أي مرحلة
+      const rows = keys.map((k) => ({ project_id: p.id, checkpoint: k, status: A.stageOf(p, k).status, crew_id: team.value || null }));
+      const r = await S.sb.from('project_stages').upsert(rows, { onConflict: 'project_id,checkpoint' }).select();
+      if (r.error) { A.fail(r.error); return false; }
+      r.data.forEach((x) => { (S.stages[p.id] ||= {})[x.checkpoint] = x; });
+      toast(team.value ? `أُسندت ${num(keys.length)} مرحلة إلى ${A.crewOf(team.value)?.name}` : 'أُلغي الإسناد');
+      A.render();
+    } }]);
   }
 
   // نافذة تعديل مرحلة
@@ -207,7 +237,7 @@
     const notes = h('textarea', { rows: 3, maxlength: 2000 }, s.notes || '');
     A.modal(`${num(c.position)}. ${c.name_ar}`, h('div', { class: 'stack sm' }, seg,
       h('div', { class: 'form-grid' }, A.field('تاريخ البدء', sd, { hint: 'يُملأ تلقائياً عند "جارية"' }), A.field('تاريخ الانتهاء', ed, { hint: 'يُملأ تلقائياً عند "مكتملة"' }),
-        A.field('الفرقة', team), A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }))),
+        A.field('المنفّذ (فرقة أو مقاول)', team), A.field('عدد الكوادر', crew), A.field('ملاحظات', notes, { wide: true }))),
     [{ label: 'حفظ', cls: 'primary', run: async () => {
       const n = crew.value === '' ? null : Number(crew.value);
       if (n !== null && !(Number.isInteger(n) && n >= 0 && n <= 500)) { toast('عدد الكوادر من 0 إلى 500', 'error'); return false; }
