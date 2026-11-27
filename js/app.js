@@ -204,7 +204,8 @@
     // كتابة لم تُحفظ بعد: تمنع إعادة الرسم التلقائية (مثل تدوير الهاتف)
     state._dirty = false;
     main.addEventListener('input', () => { state._dirty = true; });
-    root.appendChild(h('div', { class: 'app app-side' }, ...topbar(r).filter(Boolean), main));
+    const [side, mtop, mbar, dtop] = topbar(r);
+    root.appendChild(h('div', { class: 'app app-side' }, side, h('div', { class: 'app-col' }, dtop, mtop, main), mbar));
     const done = (n) => { clear(main).appendChild(n); if (entering) { main.classList.add('enter'); countUp(main); } };
     const out = v.render(r);
     if (out instanceof Promise) {
@@ -253,7 +254,9 @@
     calendar: ['M4 5h16v16H4z', 'M4 10h16', 'M8 3v4', 'M16 3v4', 'M8 14h2', 'M14 14h2', 'M8 18h2'],
     tasks: ['M4 5h4v4H4z', 'M4 15h4v4H4z', 'M11 7h9', 'M11 17h9', 'M5 7l1 1 2-2'],
     search: ['M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z', 'M21 21l-5-5'],
-    more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01']
+    more: ['M5 12h.01', 'M12 12h.01', 'M19 12h.01'],
+    help: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6', 'M12 17h.01'],
+    down: ['M6 9l6 6 6-6']
   };
   function icon(k) {
     const NS = 'http://www.w3.org/2000/svg';
@@ -261,6 +264,23 @@
     svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', 'ico');
     (ICONS[k] || []).forEach((d) => { const path = document.createElementNS(NS, 'path'); path.setAttribute('d', d); svg.appendChild(path); });
     return svg;
+  }
+  function userMenu() {
+    const name = state.profile.full_name || state.user.email;
+    return h('details', { class: 'dt-user' },
+      h('summary', null, h('span', { class: 'dt-av', 'aria-hidden': 'true' }, String(name).trim()[0] || '؟'),
+        h('span', { class: 'dt-who' }, h('b', null, name), h('small', null, ROLES[role()])), icon('down')),
+      h('div', { class: 'dt-menu' },
+        h('button', { type: 'button', onClick: toggleTheme }, 'تبديل المظهر'),
+        h('button', { type: 'button', onClick: changePassword }, 'كلمة المرور'),
+        h('button', { type: 'button', class: 'out', onClick: signOut }, 'تسجيل الخروج')));
+  }
+  function helpBox() {
+    modal('مساعدة سريعة', h('ul', { class: 'help-list' },
+      h('li', null, h('b', null, 'البحث: '), 'Ctrl + K من أي صفحة، أو "/" في صفحة المشاريع.'),
+      h('li', null, h('b', null, 'الأرقام في لوحة التحكم: '), 'اضغط أي رقم ليفتح المشاريع مصفّاة.'),
+      h('li', null, h('b', null, 'المرحلة الحالية: '), 'من صفحة المشروع اضغط "ابدأ" ثم "اكتملت" فتبدأ التالية وحدها.'),
+      h('li', null, h('b', null, 'الفني: '), 'يرسل تقرير المرحلة بصورة، ويوافق عليه المدير أو المشرف.')), []);
   }
   function topbar(r) {
     const p = r.name === 'project' ? state.projects.find((x) => x.id === r.id) : null;
@@ -298,7 +318,7 @@
     btns[0].onclick = toggleTheme; btns[1].onclick = changePassword; btns[2].onclick = signOut;
     return [
       h('aside', { class: 'side', 'aria-label': 'القائمة الرئيسية' },
-        h('a', { href: '#/home', class: 'side-logo', onClick: stay('home') }, logo(), h('span', null, 'متابعة المشاريع')),
+        h('a', { href: '#/home', class: 'side-logo', onClick: stay('home') }, logo(), h('span', null, 'منصة المشاريع')),
         window.Collab ? window.Collab.bell('side-bell') : null,
         window.Insights ? h('button', { type: 'button', class: 'side-search', onClick: () => window.Insights.search() }, icon('search'), h('span', null, 'بحث'), h('kbd', { dir: 'ltr' }, 'Ctrl K')) : null,
         h('nav', { class: 'side-nav' }, menu.map(link)),
@@ -310,7 +330,15 @@
       // في صفحات المجمّع يظهر شريط المجمّع السفلي بدل هذا
       p && isCompound(p) ? null : h('nav', { class: 'mbar', 'aria-label': 'التنقل' }, menu.slice(0, 2).map(link),
         h('button', { type: 'button', class: 'mbar-plus', 'aria-label': 'إضافة', onClick: plusSheet }, h('span', { 'aria-hidden': 'true' }, '+')),
-        link(menu[2]), more)
+        link(menu[2]), more),
+      // الشريط العلوي على الكمبيوتر: البحث، والمساعدة، والإشعارات، وحساب المستخدم
+      h('header', { class: 'dtop' },
+        window.Insights ? h('button', { type: 'button', class: 'dt-search', onClick: () => window.Insights.search() }, icon('search'),
+          h('span', null, 'البحث في المشاريع، المهام، العملاء …'), h('kbd', { dir: 'ltr' }, 'Ctrl K')) : h('span'),
+        h('span', { class: 'dt-gap' }),
+        h('button', { type: 'button', class: 'dt-btn', 'aria-label': 'مساعدة', title: 'مساعدة', onClick: helpBox }, icon('help')),
+        window.Collab ? window.Collab.bell('dt-btn dt-bell') : null,
+        userMenu())
     ];
   }
 
@@ -471,7 +499,7 @@
   }
 
   /* ---------- المشاريع ---------- */
-  views.home = { title: 'مشاريع سرور', render: () => homeFeed() };
+  views.home = { title: 'مشاريع سرور', render: () => homeDash() };
   views.compounds = { title: 'المجمّعات السكنية', render: () => portfolio('compounds') };
 
   /* ---------- الرئيسية: كل مشاريع الشركة، كل مشروع سطر واحد بنسبة إنجازه ---------- */
@@ -512,155 +540,236 @@
      كل رقم وكل دائرة يفتح القائمة أو المشروع.
      ========================================================== */
   const initials = (t) => String(t || '').trim().split(/\s+/).filter((w) => !/^(ال)?(مشروع|عمارة|بيت|دائرة|مجمع|مجمّع)$/.test(w)).slice(0, 2).map((w) => w.replace(/^ال/, '')[0] || '').join(' ') || '؟';
-  const telOf = (x) => String(x || '').replace(/[^0-9+]/g, '');
   const ringStyle = (pct) => ({ '--p': String(Math.round((pct || 0) * 100)) });
 
-  async function homeFeed() {
+  /* ==========================================================
+     لوحة التحكم (هوية سرور): ترحيب، أربع بطاقات أرقام، تقدم المشاريع،
+     معدل الإنجاز الشهري، مشروع يحتاج متابعة، المواعيد، آخر النشاطات،
+     نظرة سريعة، وجدول أبرز المشاريع. كل رقم يفتح القائمة مصفّاة.
+     ========================================================== */
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  function sv(tag, attrs, ...kids) {
+    const el = document.createElementNS(SVGNS, tag);
+    Object.entries(attrs || {}).forEach(([k, v]) => { if (v !== null && v !== undefined) el.setAttribute(k, String(v)); });
+    kids.flat(Infinity).forEach((c) => { if (c === null || c === undefined) return; el.appendChild(c instanceof Node ? c : document.createTextNode(String(c))); });
+    return el;
+  }
+  const DICONS = {
+    layers: ['M12 3l9 5-9 5-9-5z', 'M3 13l9 5 9-5', 'M3 17.5l9 5 9-5'],
+    play: ['M8 5v14l11-7z'],
+    target: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z', 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M12 12l7-7', 'M16 5h3v3'],
+    alert: ['M12 3l10 18H2z', 'M12 10v5', 'M12 18h.01'],
+    building: ['M4 21V5l8-3v19', 'M12 21V9l8 3v9', 'M2 21h20', 'M7 8h2', 'M7 12h2', 'M7 16h2', 'M15 14h2', 'M15 17h2'],
+    calendar: ['M4 5h16v16H4z', 'M4 10h16', 'M8 3v4', 'M16 3v4'],
+    pulse: ['M3 12h4l3-7 4 14 3-7h4'],
+    up: ['M12 19V5', 'M6 11l6-6 6 6'],
+    edit: ['M4 20h4L19 9l-4-4L4 16z'],
+    check: ['M5 12l5 5 9-10'],
+    chat: ['M4 5h16v11H8l-4 4z'],
+    team: ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z', 'M2 21c0-4 3-6 7-6s7 2 7 6', 'M17 4a3.5 3.5 0 0 1 0 7', 'M19 15c2 .6 3 2.5 3 6'],
+    tasks: ['M4 5h16v14H4z', 'M8 12l3 3 5-6'],
+    helmet: ['M3 18h18', 'M5 18a7 7 0 0 1 14 0', 'M10 11V7h4v4'],
+    arrow: ['M19 12H5', 'M11 6l-6 6 6 6'],
+    chev: ['M15 6l-6 6 6 6']
+  };
+  const dIcon = (k, cls = 'dico') => sv('svg', { viewBox: '0 0 24 24', class: cls, 'aria-hidden': 'true' }, (DICONS[k] || []).map((d) => sv('path', { d })));
+  const MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+  const isoDay = (d) => d.toLocaleDateString('en-CA');
+
+  // إنجاز كل المشاريع في نهاية يوم معيّن: المراحل من تواريخها، والمجمّع تقديراً خطياً من بدايته حتى نسبته اليوم
+  function avgAt(rows, day) {
+    const xs = [];
+    rows.forEach((r) => {
+      const born = (r.p.start_date || r.p.created_at || '').slice(0, 10);
+      if (born && born > day) return;
+      if (r.compound) {
+        const t0 = new Date(born || todayStr()).getTime(), t1 = Date.now(), t = new Date(day + 'T23:59:59').getTime();
+        xs.push(t1 > t0 ? r.pct * Math.min(1, Math.max(0, (t - t0) / (t1 - t0))) : r.pct);
+        return;
+      }
+      const sp = Core.progress(state.checkpoints, (key) => {
+        const s = stageOf(r.p, key);
+        if (s.status === 'na') return s;
+        if (s.status === 'done' && s.end_date && s.end_date <= day) return s;
+        if ((s.status === 'done' || s.status === 'in_progress') && s.start_date && s.start_date <= day) return { ...s, status: 'in_progress' };
+        return { ...s, status: 'not_started' };
+      });
+      xs.push(sp.pct);
+    });
+    return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+  }
+
+  function lineChart(pts) {
+    const W = 360, H = 170, L = 34, R = 14, T = 26, B = 26;
+    const top = Math.max(...pts.map((p) => p.v));
+    const stepV = top <= 0.4 ? 0.1 : 0.2;
+    const max = Math.max(stepV, Math.ceil(top / stepV - 1e-9) * stepV);
+    const x = (i) => L + 18 + (i * (W - L - R - 18)) / Math.max(1, pts.length - 1);   // الزمن من اليسار لليمين مثل محور المخططات
+    const y = (v) => T + (1 - v / max) * (H - T - B);
+    const steps = Math.round(max / stepV), grid = [];
+    for (let k = 0; k <= steps; k++) {
+      const v = (max * k) / steps;
+      grid.push(sv('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: 'lc-grid' }),
+        sv('text', { x: L - 6, y: y(v) + 4, class: 'lc-ax', 'text-anchor': 'end' }, Math.round(v * 100) + '%'));
+    }
+    const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+    const area = d + ` L${x(pts.length - 1).toFixed(1)},${y(0)} L${x(0).toFixed(1)},${y(0)} Z`;
+    const last = pts.length - 1, lx = x(last), ly = y(pts[last].v);
+    const label = Math.round(pts[last].v * 1000) / 10 + '%';
+    return sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'lc', role: 'img', 'aria-label': 'معدل الإنجاز شهرياً: ' + pts.map((p) => `${p.m} ${Math.round(p.v * 1000) / 10}%`).join('، ') },
+      sv('defs', null, sv('linearGradient', { id: 'lcFill', x1: 0, x2: 0, y1: 0, y2: 1 }, sv('stop', { offset: '0', class: 'lc-s0' }), sv('stop', { offset: '1', class: 'lc-s1' }))),
+      grid, sv('path', { d: area, fill: 'url(#lcFill)' }), sv('path', { d, class: 'lc-line' }),
+      pts.map((p, i) => [sv('circle', { cx: x(i), cy: y(p.v), r: i === last ? 6 : 4, class: i === last ? 'lc-dot now' : 'lc-dot' }),
+        sv('text', { x: x(i), y: H - 6, class: 'lc-ax', 'text-anchor': 'middle' }, p.m)]),
+      sv('rect', { x: Math.min(W - 62, lx - 30), y: Math.max(0, ly - 32), width: 60, height: 22, rx: 6, class: 'lc-tip' }),
+      sv('text', { x: Math.min(W - 32, lx), y: Math.max(0, ly - 32) + 15, class: 'lc-tipt', 'text-anchor': 'middle' }, label));
+  }
+
+  function donut(parts, centerTop, centerSub) {
+    const total = parts.reduce((a, p) => a + p.n, 0) || 1, C = 2 * Math.PI * 42;
+    let off = 0;
+    return sv('svg', { viewBox: '0 0 120 120', class: 'dn', role: 'img', 'aria-label': parts.map((p) => `${p.label} ${p.n}`).join('، ') },
+      sv('circle', { cx: 60, cy: 60, r: 42, class: 'dn-track' }),
+      parts.filter((p) => p.n).map((p) => {
+        const len = (p.n / total) * C;
+        const el = sv('circle', { cx: 60, cy: 60, r: 42, class: 'dn-seg ' + p.cls, 'stroke-dasharray': `${len} ${C - len}`, 'stroke-dashoffset': -off, transform: 'rotate(-90 60 60)' });
+        off += len; return el;
+      }),
+      sv('text', { x: 60, y: 60, class: 'dn-big', 'text-anchor': 'middle' }, centerTop),
+      sv('text', { x: 60, y: 78, class: 'dn-sub', 'text-anchor': 'middle' }, centerSub));
+  }
+
+  async function homeDash() {
     await Promise.all([...state.projects.filter(isCompound).map((p) => loadProject(p.id)), window.Tasks ? window.Tasks.ensure() : null]);
     const openList = (patch) => { state._pf = { ...PF_DEFAULT, ...patch }; go('projects'); };
     const rows = state.projects.map(projInfo);
     const by = (st) => rows.filter((r) => r.status === st).length;
-    const overdue = rows.filter((r) => r.sc?.late), behind = rows.filter((r) => r.sc?.behind && !r.sc?.late);
     const attn = rows.filter((r) => r.why.length).sort((a, b) => (b.bad - a.bad) || (b.why.length - a.why.length));
     const avg = rows.length ? rows.reduce((a, r) => a + r.pct, 0) / rows.length : 0;
     const cpN = Object.fromEntries(state.checkpoints.map((c) => [c.key, c]));
-    const P = (n) => cntAr(n, 'مشروع واحد', 'مشروعان', 'مشاريع', 'مشروعاً');
+    const card = (cls, ...kids) => h('section', { class: 'dc ' + cls }, ...kids);
+    const head = (ic, title, extra) => h('header', { class: 'dc-h' }, h('h2', null, dIcon(ic, 'dico h'), title), extra || null);
 
-    // التحية والجملة
+    // ---- الترحيب
     const hr = new Date().getHours();
-    const hello = (hr < 12 ? 'صباح الخير' : 'مساء الخير') + (state.profile?.full_name ? '، ' + state.profile.full_name.split(' ')[0] : '');
-    const lead = !rows.length ? 'لا توجد مشاريع بعد. اضغط + لإضافة أول مشروع.'
-      : [`${P(rows.length)}: ${[[by('in_progress'), 'جارٍ', 'جارية'], [by('done'), 'مكتمل', 'مكتملة'], [by('not_started'), 'لم يبدأ', 'لم تبدأ']]
-          .filter(([n]) => n).map(([n, one, many]) => (n === 1 ? `واحد ${one}` : `${num(n)} ${many}`)).join('، و')}.`,
-        overdue.length ? ` ${overdue.length === 1 ? 'مشروع واحد فات موعد تسليمه' : `${P(overdue.length)} فات موعد تسليمها`}.` : '',
-        behind.length ? ` ${behind.length === 1 ? 'وواحد متأخر عن الجدول' : `و${num(behind.length)} متأخرة عن الجدول`}.` : '',
-        !overdue.length && !behind.length ? ' كل المواعيد على ما يرام.' : ''].join('');
+    const first = (state.profile?.full_name || '').split(' ')[0];
+    const today = new Date().toLocaleDateString('ar-EG-u-nu-latn', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    const hero = h('header', { class: 'd-hero' },
+      h('div', { class: 'dh-text' }, h('h1', null, (hr < 12 ? 'صباح الخير' : 'مساء الخير') + (first ? '، ' + first : '')),
+        h('p', null, rows.length ? 'إدارة مشاريعك ومتابعة الإنجاز والمواعيد بكل كفاءة' : 'لا توجد مشاريع بعد. أضف أول مشروع لتبدأ المتابعة.'),
+        isStaff() ? h('div', { class: 'dh-acts' },
+          h('button', { type: 'button', class: 'btn primary sm', onClick: newProject }, '+ مشروع جديد'),
+          window.Plan && rows.length ? h('button', { type: 'button', class: 'btn sm', onClick: () => window.Plan.brief() }, 'ملخّص الصباح') : null) : null),
+      h('a', { href: '#/calendar', class: 'dh-date' }, dIcon('calendar'), h('span', null, today), dIcon('chev', 'dico sm')));
 
-    // ---- دوائر المشاريع (مثل الستوري): الجارية أولاً، والمتأخرة بحلقة حمراء
-    const storyRows = rows.filter((r) => r.status !== 'done').sort((a, b) => (b.bad - a.bad) || (b.why.length - a.why.length) || ({ in_progress: 0, not_started: 1 }[a.status] - { in_progress: 0, not_started: 1 }[b.status]));
-    const story = (r) => h('a', { href: '#/project/' + r.p.id, class: 'story ' + (r.sc?.late || r.bad ? 'late' : r.sc?.behind || r.why.length ? 'warn' : r.status), title: `${r.p.client} · ${pctText(r.pct)}` },
-      h('span', { class: 'st-ring', style: ringStyle(r.pct) }, h('span', { class: 'st-face' }, h('b', null, initials(r.p.client)), h('small', null, pctText(r.pct)))),
-      h('span', { class: 'st-name' }, r.p.client));
-    const stories = h('div', { class: 'stories', role: 'list', 'aria-label': 'المشاريع الجارية' },
-      isStaff() ? h('button', { type: 'button', class: 'story add', onClick: newProject, role: 'listitem' },
-        h('span', { class: 'st-ring' }, h('span', { class: 'st-face' }, h('b', { 'aria-hidden': 'true' }, '+'))), h('span', { class: 'st-name' }, 'مشروع جديد')) : null,
-      storyRows.slice(0, 30).map((r) => { const el = story(r); el.setAttribute('role', 'listitem'); return el; }),
-      rows.length > storyRows.length ? h('a', { href: '#/projects', class: 'story more', role: 'listitem', onClick: () => { state._pf = { ...PF_DEFAULT, st: 'done' }; } },
-        h('span', { class: 'st-ring', style: ringStyle(1) }, h('span', { class: 'st-face' }, h('b', null, '✓'), h('small', null, num(rows.length - storyRows.length)))), h('span', { class: 'st-name' }, 'المكتملة')) : null);
+    // ---- بطاقات الأرقام
+    const U = (n) => (n === 1 ? 'مشروع' : n === 2 ? 'مشروعان' : n >= 3 && n <= 10 ? 'مشاريع' : 'مشروعاً');
+    const kpi = (cls, ic, label, value, unit, patch) => h('button', { type: 'button', class: 'kpi ' + cls, onClick: () => openList(patch) },
+      h('span', { class: 'kpi-ic' }, dIcon(ic)), h('span', { class: 'kpi-t' }, h('span', { class: 'kpi-l' }, label), h('b', null, value), unit ? h('small', null, unit) : null));
+    const kpis = h('div', { class: 'kpis' },
+      kpi('k-all', 'layers', 'إجمالي المشاريع', num(rows.length), U(rows.length), {}),
+      kpi('k-run', 'play', 'المشاريع الجارية', num(by('in_progress')), U(by('in_progress')), { st: 'in_progress' }),
+      kpi('k-avg', 'target', 'متوسط الإنجاز', pctText(avg), null, {}),
+      kpi('k-attn', 'alert', 'تحتاج إلى متابعة', num(attn.length), U(attn.length), { st: 'attn' }));
 
-    // ---- الأرقام: شرائح تُمرَّر، كل واحدة تفتح القائمة
-    const chip = (label, n, cls, patch) => h('button', { type: 'button', class: 'stat-chip ' + cls, onClick: () => openList(patch) }, h('b', null, num(n)), h('span', null, label));
-    const stats = h('div', { class: 'stat-chips' },
-      chip('كل المشاريع', rows.length, '', {}), chip('جارية', by('in_progress'), 'run', { st: 'in_progress' }), chip('مكتملة', by('done'), 'ok', { st: 'done' }),
-      chip('لم تبدأ', by('not_started'), 'idle', { st: 'not_started' }), chip('فات موعدها', overdue.length, overdue.length ? 'bad' : 'zero', { st: 'overdue' }),
-      chip('متأخرة عن الجدول', behind.length, behind.length ? 'warn' : 'zero', { st: 'behind' }), chip('تحتاج انتباهك', attn.length, attn.length ? 'warn' : 'zero', { st: 'attn' }));
+    // ---- تقدم المشاريع (حلقة)
+    const late = rows.filter((r) => r.status !== 'done' && (r.sc?.late || r.sc?.behind)).length;
+    const parts = [
+      { label: 'مكتملة', n: by('done'), cls: 'done', st: 'done' },
+      { label: 'جارية', n: rows.filter((r) => r.status === 'in_progress' && !(r.sc?.late || r.sc?.behind)).length, cls: 'run', st: 'in_progress' },
+      { label: 'متأخرة', n: late, cls: 'late', st: 'behind' },
+      { label: 'لم تبدأ', n: rows.filter((r) => r.status === 'not_started' && !(r.sc?.late || r.sc?.behind)).length, cls: 'idle', st: 'not_started' }];
+    const share = (n) => pctText(rows.length ? n / rows.length : 0);
+    const progCard = card('d-prog', head('calendar', 'تقدم المشاريع'),
+      h('div', { class: 'dp-body' },
+        h('ul', { class: 'dp-legend' }, parts.map((p) => h('li', null, h('button', { type: 'button', onClick: () => openList({ st: p.st }) },
+          h('i', { class: p.cls }), h('span', null, p.label), h('b', null, share(p.n)))))),
+        donut(parts, Math.round(avg * 1000) / 10 + '%', 'متوسط الإنجاز')));
 
-    // ---- بطاقة مشروع يحتاج انتباهاً
-    const attnCard = (r) => {
-      const cur = r.sp?.cur && r.status !== 'done' ? r.sp.cur : null;
-      const crew = cur?.s.crew_id ? crewOf(cur.s.crew_id) : null;
-      return h('article', { class: 'fc pcard2 ' + (r.bad ? 'bad' : 'warn') },
-        h('a', { href: '#/project/' + r.p.id, class: 'pc-head' },
-          h('span', { class: 'st-ring sm', style: ringStyle(r.pct) }, h('span', { class: 'st-face' }, h('b', null, initials(r.p.client)))),
-          h('span', { class: 'pc-title' }, h('b', null, r.p.client), h('small', null, [r.compound ? PTYPES.compound : PTYPES[r.p.project_type], r.p.governorate].filter(Boolean).join(' · '))),
-          h('span', { class: 'pc-pct' }, pctText(r.pct))),
-        h('ul', { class: 'pc-why' }, r.why.map((w) => h('li', null, w))),
-        h('div', { class: 'pc-bar' }, h('span', { style: { width: (r.pct * 100).toFixed(1) + '%' } }),
-          r.sc?.expected != null ? h('i', { style: { 'inset-inline-start': (r.sc.expected * 100).toFixed(1) + '%' }, title: 'المتوقع حسب الوقت' }) : null),
-        h('p', { class: 'pc-now' }, r.now, crew ? ` · ${crew.name}` : ''),
-        h('div', { class: 'pc-acts' },
-          h('a', { href: '#/project/' + r.p.id, class: 'btn primary sm' }, 'فتح المشروع'),
-          crew?.phone ? h('a', { href: 'tel:' + telOf(crew.phone), class: 'btn sm' }, '📞 ' + crew.name) : null,
-          r.p.customer_phone ? h('a', { href: 'tel:' + telOf(r.p.customer_phone), class: 'btn sm ghost' }, '📞 العميل') : null));
-    };
+    // ---- معدل الإنجاز آخر خمسة أشهر
+    const now = new Date(), pts = [];
+    for (let k = 4; k >= 0; k--) {
+      const end = k ? new Date(now.getFullYear(), now.getMonth() - k + 1, 0) : now;
+      pts.push({ m: MONTHS[end.getMonth()], v: avgAt(rows, isoDay(end)) });
+    }
+    const diff = pts[4].v - pts[3].v;
+    const rateCard = card('d-rate', head('pulse', 'معدل إنجاز المشاريع',
+      h('span', { class: 'chg ' + (diff >= 0 ? 'up' : 'down') }, h('b', null, (diff >= 0 ? '↑ +' : '↓ ') + Math.round(Math.abs(diff) * 1000) / 10 + '%'), h('small', null, 'مقارنة بالشهر الماضي'))),
+      rows.length ? lineChart(pts) : h('p', { class: 'muted calm' }, 'يظهر المخطط بعد إضافة المشاريع.'));
 
-    // ---- اليوم: مراحل تحركت + تقارير الفنيين + فحوصات المجمّعات
-    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
-    const moved = [];
-    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.updated_at && new Date(x.updated_at) >= t0 && x.status !== 'not_started') moved.push({ p, x }); }));
-    moved.sort((a, b) => (a.x.updated_at < b.x.updated_at ? 1 : -1));
-    const verb = { in_progress: 'بدأت', done: 'اكتملت', na: 'لا تنطبق' };
-    const todayCard = h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'اليوم'), h('small', null, new Date().toLocaleDateString('ar-IQ', { weekday: 'long', day: 'numeric', month: 'long' }))),
-      moved.length ? h('ol', { class: 'feed-list' }, moved.slice(0, 12).map(({ p, x }) => h('li', null,
-        h('a', { href: '#/project/' + p.id, class: 'fl-row' },
-          h('span', { class: 'fl-ic ' + x.status, 'aria-hidden': 'true' }, x.status === 'done' ? '✓' : x.status === 'na' ? '—' : '▶'),
-          h('span', { class: 'fl-main' }, h('b', null, p.client), h('small', null, `${verb[x.status]} مرحلة ${cpN[x.checkpoint]?.name_ar || ''}` + (crewOf(x.crew_id) ? ` · ${crewOf(x.crew_id).name}` : ''))),
-          h('time', { dir: 'ltr' }, new Date(x.updated_at).toTimeString().slice(0, 5))))))
-        : h('p', { class: 'calm muted' }, 'لم تتحرّك أي مرحلة اليوم بعد.'),
-      rows.some((r) => r.compound) ? h('div', { class: 'fc-sub' }, h('h3', null, 'فحوصات المجمّعات اليوم'), todayActivity(state.projects.filter(isCompound).map((p) => p.id))) : null);
+    // ---- مشروع يحتاج متابعة
+    const a = attn[0];
+    const attnCard = a ? card('d-attn', h('span', { class: 'da-tag' }, dIcon('alert', 'dico sm'), attn.length > 1 ? `${num(attn.length)} مشاريع تحتاج إلى متابعة` : 'مشروع يحتاج إلى متابعة'),
+      h('div', { class: 'da-head' }, h('span', { class: 'da-ic' }, dIcon('building')),
+        h('div', null, h('b', null, a.p.client), h('small', null, 'معدل الإنجاز: ', h('strong', null, pctText(a.pct))))),
+      h('div', { class: 'da-bar' }, h('span', { style: { width: Math.max(2, a.pct * 100).toFixed(1) + '%' } })),
+      h('p', { class: 'da-why' }, a.why[0]),
+      h('p', { class: 'da-now' }, dIcon('layers', 'dico sm'), a.now),
+      h('a', { href: '#/project/' + a.p.id, class: 'btn primary block' }, 'فتح المشروع', dIcon('arrow', 'dico sm')))
+      : card('d-attn calm', h('span', { class: 'da-ic ok' }, dIcon('check')), h('b', null, 'كل المشاريع على ما يرام'), h('p', { class: 'muted' }, 'لا مشاريع متأخرة أو متوقفة الآن.'));
 
     // ---- المواعيد القادمة
-    const dues = rows.filter((r) => r.sc?.has && r.status !== 'done').sort((a, b) => a.sc.daysLeft - b.sc.daysLeft);
-    const duesCard = h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'المواعيد القادمة'),
-      h('a', { href: '#/calendar', class: 'link small' }, 'تقويم المواعيد')),
-      dues.length ? h('ol', { class: 'feed-list' }, dues.slice(0, 6).map((r) => h('li', null, h('a', { href: '#/project/' + r.p.id, class: 'fl-row' },
-        h('span', { class: 'day-pill ' + (r.sc.late ? 'bad' : r.sc.behind ? 'warn' : '') }, h('b', null, num(Math.abs(r.sc.daysLeft))), h('small', null, r.sc.late ? 'متأخر' : 'يوم')),
-        h('span', { class: 'fl-main' }, h('b', null, r.p.client), h('small', null, r.due),
-          r.fc && r.fc.diff !== null ? h('small', { class: 'due-fc' + (r.fc.diff < 0 ? ' late' : ''), title: forecastText(r.fc) }, forecastText(r.fc, true)) : null),
-        h('span', { class: 'mini-pct' }, pctText(r.pct))))))
-        : h('p', { class: 'calm muted' }, 'لا توجد مشاريع بتاريخ تسليم. أضفه من "بيانات المشروع".'));
+    const dues = rows.filter((r) => r.sc?.has && r.status !== 'done').sort((x, y) => x.sc.daysLeft - y.sc.daysLeft);
+    const duesCard = card('d-dues', head('calendar', 'المواعيد القادمة', h('a', { href: '#/calendar', class: 'dc-more' }, 'التقويم')),
+      dues.length ? h('ol', { class: 'dd-list' }, dues.slice(0, 3).map((r) => {
+        const d = new Date(r.p.due_date + 'T00:00:00'); const ok = !r.sc.late && !r.sc.behind;
+        return h('li', null, h('a', { href: '#/project/' + r.p.id },
+          h('span', { class: 'dd-date' + (r.sc.late ? ' bad' : '') }, h('b', null, String(d.getDate())), h('small', null, MONTHS[d.getMonth()])),
+          h('span', { class: 'dd-main' }, h('b', null, r.p.client), h('small', null, r.due)),
+          h('span', { class: 'dd-st ' + (ok ? 'ok' : r.sc.late ? 'bad' : 'warn'), title: ok ? 'على الموعد' : 'متأخر' }, ok ? dIcon('check', 'dico sm') : null)));
+      })) : h('p', { class: 'muted calm' }, 'لا توجد مواعيد تسليم. أضفها من بيانات المشروع.'));
 
-    // ---- أين تقف المشاريع: شرائح تُمرَّر
-    const plain = rows.filter((r) => !r.compound);
-    const pipe = h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'أين تقف المشاريع')),
-      h('div', { class: 'pipe2' }, state.checkpoints.map((c) => {
-        const here = plain.filter((r) => r.curKey === c.key);
-        return h('button', { type: 'button', class: 'pp2' + (here.length ? ' has' : ''), disabled: !here.length, title: here.map((x) => x.p.client).join('، '),
-          onClick: () => (here.length === 1 ? go('project/' + here[0].p.id) : openList({ q: '' })) },
-          h('small', null, num(c.position)), h('b', null, here.length ? num(here.length) : '·'), h('span', null, c.name_ar));
-      })));
+    // ---- آخر النشاطات: تحديثات المراحل وتقارير الفنيين
+    const acts = [];
+    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => {
+      if (x.updated_at && x.status !== 'not_started') acts.push({ at: x.updated_at, p, ic: x.status === 'done' ? 'check' : 'edit', cls: x.status === 'done' ? 'ok' : 'run',
+        t: `${x.status === 'done' ? 'اكتملت' : x.status === 'na' ? 'لا تنطبق' : 'بدأت'} مرحلة ${cpN[x.checkpoint]?.name_ar || ''}` });
+    }));
+    (state.requests || []).forEach((q) => { const p = state.projects.find((y) => y.id === q.project_id); if (p && q.requested_at) acts.push({ at: q.requested_at, p, ic: 'chat', cls: 'msg', t: `تقرير فني: ${q.action === 'done' ? 'اكتمال' : 'بدء'} ${cpN[q.checkpoint]?.name_ar || ''}` }); });
+    acts.sort((x, y) => (x.at < y.at ? 1 : -1));
+    const when = (s) => { const d = new Date(s); return isoDay(d) === todayStr() ? d.toTimeString().slice(0, 5) : `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
+    const actCard = card('d-act', head('pulse', 'آخر النشاطات'),
+      acts.length ? h('ol', { class: 'da-list' }, acts.slice(0, 4).map((x) => h('li', null, h('a', { href: '#/project/' + x.p.id },
+        h('span', { class: 'dl-ic ' + x.cls }, dIcon(x.ic, 'dico sm')), h('span', { class: 'dl-main' }, h('b', null, x.p.client), h('small', null, x.t)),
+        h('time', { dir: 'ltr' }, when(x.at))))))
+        : h('p', { class: 'muted calm' }, 'لا نشاطات بعد.'));
 
-    // ---- الفرق والمقاولون: دوائر صغيرة، الملوّنة تعمل الآن
-    const working = new Set();
-    state.projects.forEach((p) => Object.values(state.stages[p.id] || {}).forEach((x) => { if (x.status === 'in_progress' && x.crew_id) working.add(x.crew_id); }));
-    (state.crewUnits || []).forEach((x) => { if (x.in_progress > 0) working.add(x.crew_id); });   // فرق تعمل بوحدات المجمّعات
-    const crews = state.crews.filter((c) => c.active).sort((a, b) => working.has(b.id) - working.has(a.id));
-    const crewsCard = crews.length ? h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'الفرق والمقاولون'),
-      h('small', null, (() => { const n = crews.filter((c) => working.has(c.id)).length; return n ? cntAr(n, 'واحد يعمل الآن', 'اثنان يعملان الآن', 'يعملون الآن', 'يعملون الآن') : 'لا أحد يعمل الآن'; })())),
-      h('div', { class: 'crew-row' }, crews.map((c) => h('a', { href: '#/crews', class: 'crew-dot ' + (working.has(c.id) ? 'busy' : '') + ' ' + c.kind },
-        h('span', { class: 'cd-face' }, initials(c.name)), h('span', { class: 'cd-name' }, c.name))))) : null;
+    // ---- نظرة سريعة
+    const crewsActive = state.crews.filter((c) => c.active);
+    const tile = (cls, ic, n, label, href) => h('a', { href, class: 'qt ' + cls }, h('span', { class: 'qt-ic' }, dIcon(ic)), h('b', null, num(n)), h('small', null, label));
+    const openTasks = (state.tasks || []).filter((t) => t.status !== 'done').length;
+    const quick = card('d-quick', head('layers', 'نظرة سريعة'), h('div', { class: 'qt-grid' },
+      tile('q1', 'team', crewsActive.filter((c) => c.kind !== 'contractor').length, 'الفرق', '#/crews'),
+      tile('q2', 'building', state.projects.filter(isCompound).length, 'المجمعات السكنية', '#/compounds'),
+      tile('q3', 'tasks', openTasks, 'المهام المفتوحة', '#/tasks'),
+      tile('q4', 'helmet', crewsActive.filter((c) => c.kind === 'contractor').length, 'المقاولون', '#/crews')));
 
-    // ---- حسب المحافظة والماركة: شرائح
-    const govs = [...new Set(rows.map((r) => r.p.governorate).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ar'));
-    const brands = [...new Set(rows.map((r) => r.p.brand).filter(Boolean))].sort();
-    const groupsCard = govs.length || brands.length ? h('section', { class: 'fc' }, h('header', { class: 'fc-h' }, h('h2', null, 'تصفّح')),
-      govs.length ? h('div', { class: 'tag-row' }, govs.map((g) => h('button', { type: 'button', class: 'tag', onClick: () => openList({ gov: g }) }, '📍 ' + g, h('small', null, num(rows.filter((r) => r.p.governorate === g).length))))) : null,
-      brands.length ? h('div', { class: 'tag-row' }, brands.map((b) => h('button', { type: 'button', class: 'tag', dir: 'auto', onClick: () => openList({ brand: b }) }, b, h('small', null, num(rows.filter((r) => r.p.brand === b).length))))) : null) : null;
+    // ---- أبرز المشاريع
+    const top = [...rows].sort((x, y) => (y.why.length > 0) - (x.why.length > 0) || ({ in_progress: 0, not_started: 1, done: 2 }[x.status] - { in_progress: 0, not_started: 1, done: 2 }[y.status]) || y.pct - x.pct).slice(0, 6);
+    const crewName = (r) => { const s = r.sp?.cur?.s; const c = s?.crew_id ? crewOf(s.crew_id) : null; return c ? c.name : '—'; };
+    const table = card('d-top', head('layers', 'أبرز المشاريع', h('a', { href: '#/projects', class: 'btn primary sm' }, 'عرض جميع المشاريع', dIcon('arrow', 'dico sm'))),
+      rows.length ? h('div', { class: 'dt-wrap' }, h('table', { class: 'dt' },
+        h('thead', null, h('tr', null, ['المشروع', 'العميل', 'المدينة', 'المرحلة الحالية', 'المنفّذ', 'معدل الإنجاز', ''].map((t) => h('th', null, t)))),
+        h('tbody', null, top.map((r) => h('tr', { onClick: () => go('project/' + r.p.id) },
+          h('td', { class: 'dt-name' }, h('span', { class: 'dt-ic' }, dIcon('building', 'dico sm')), h('a', { href: '#/project/' + r.p.id }, r.p.client)),
+          h('td', { 'data-l': 'العميل' }, r.p.customer_name || '—'),
+          h('td', { 'data-l': 'المدينة' }, r.p.city || r.p.governorate || '—'),
+          h('td', { 'data-l': 'المرحلة' }, h('span', { class: 'dt-stage ' + (r.why.length ? 'warn' : r.status) }, r.now)),
+          h('td', { 'data-l': 'المنفّذ' }, crewName(r)),
+          h('td', { class: 'dt-pct' }, h('span', { class: 'dt-bar' }, h('i', { style: { width: Math.max(2, r.pct * 100).toFixed(1) + '%' } })), h('b', null, pctText(r.pct))),
+          h('td', { class: 'dt-go' }, dIcon('chev', 'dico sm'))))))) : h('p', { class: 'muted calm' }, 'لا توجد مشاريع بعد.'));
 
-    // على الهاتف: الأقسام الثانوية تنطوي بسطر واحد (عنوانها وملخّصها) وتنفتح بضغطة، حتى لا تطول اللوحة
-    const phone = window.matchMedia('(max-width: 760px)').matches;
-    const fold = (sec, hint) => {
-      if (!sec || !phone) return sec;
-      const head = sec.querySelector('.fc-h');
-      const d = h('details', { class: 'fc fold' }, h('summary', { class: 'fc-h' }, ...[...head.childNodes], hint ? h('small', { class: 'fold-hint' }, hint) : null));
-      head.remove(); d.append(...[...sec.childNodes]);
-      return d;
-    };
     const reqs = window.Reports ? window.Reports.homeBox() : null;
     const tasksBox = window.Tasks ? window.Tasks.homeBox() : null;
     const insights = window.Insights ? window.Insights.homeBoxes(rows) : null;
-    const main = h('div', { class: 'feed-main' },
-      attn.length ? h('section', { class: 'feed-sec' }, h('h2', { class: 'sec-t' }, 'تحتاج انتباهك'), attn.slice(0, 6).map(attnCard),
-        attn.length > 6 ? h('button', { type: 'button', class: 'btn block', onClick: () => openList({ st: 'attn' }) }, `عرض الكل (${num(attn.length)})`) : null)
-        : rows.length ? h('section', { class: 'fc calm-card' }, h('b', null, '👌 كل شيء على ما يرام'), h('p', { class: 'muted' }, 'لا مشاريع متأخرة أو متوقفة الآن.')) : null,
-      reqs ? h('div', { class: 'fc fc-wrap' }, reqs) : null,
-      tasksBox ? h('div', { class: 'fc fc-wrap' }, tasksBox) : null,
-      todayCard,
-      insights ? h('div', { class: 'fc fc-wrap' }, insights) : null);
-    const side = h('div', { class: 'feed-side' },
-      h('section', { class: 'fc avg-card' }, h('span', { class: 'st-ring lg', style: ringStyle(avg) }, h('span', { class: 'st-face' }, h('b', null, pctText(avg)))),
-        h('div', null, h('b', null, 'متوسط الإنجاز'), h('small', { class: 'muted' }, P(rows.length)))),
-      fold(duesCard, dues.length ? `الأقرب: ${dues[0].p.client} · ${dues[0].due}` : ''),
-      fold(pipe, plain.filter((r) => r.curKey).length ? `${P(plain.filter((r) => r.curKey).length)} على المراحل` : ''),
-      fold(crewsCard), fold(groupsCard));
+    const extra = [reqs, tasksBox].filter(Boolean).map((x) => h('div', { class: 'dc d-extra' }, x));
 
-    return h('div', { class: 'feed' },
-      h('header', { class: 'feed-hello' }, h('h1', null, hello), h('p', null, lead),
-        window.Plan && isStaff() && rows.length ? h('div', { class: 'row d2-lead-act' },
-          h('button', { type: 'button', class: 'btn sm', onClick: () => window.Plan.brief() }, 'ملخّص الصباح'),
-          h('a', { href: '#/calendar', class: 'btn ghost sm' }, 'تقويم المواعيد')) : null),
-      stories, stats,
-      h('div', { class: 'feed-grid' }, main, side));
+    return h('div', { class: 'dash' }, hero, kpis,
+      h('div', { class: 'd-row r1' }, attnCard, rateCard, progCard),
+      h('div', { class: 'd-row r2' }, quick, actCard, duesCard),
+      extra.length ? h('div', { class: 'd-row r3' }, extra) : null,
+      table,
+      insights ? h('div', { class: 'dc d-extra' }, insights) : null);
   }
 
   /* ---------- صفحة المشاريع: جدول ببحث وترتيب وتصفية ---------- */
